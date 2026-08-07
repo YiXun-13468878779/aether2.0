@@ -15,24 +15,24 @@ const serif = Noto_Serif_SC({
 });
 
 export const metadata: Metadata = {
-  title: "Aether — 让作品先出现",
+  title: "Aether — 灵魂对话",
   description: "一个受原生艺术精神启发的自由创作与作品交流空间。",
   metadataBase: new URL("https://github.com/YiXun-13468878779/aether2.0"),
   openGraph: {
-    title: "Aether — 让作品先出现",
+    title: "Aether — 灵魂对话",
     description: "作品与语言之间的一层空间。自由创作，认真观看，不替你定义。",
     images: [
       {
         url: "https://raw.githubusercontent.com/YiXun-13468878779/aether2.0/main/public/og.png",
         width: 1200,
         height: 630,
-        alt: "Aether — 让作品先出现",
+        alt: "Aether — 灵魂对话",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Aether — 让作品先出现",
+    title: "Aether — 灵魂对话",
     description: "作品与语言之间的一层空间。",
     images: ["https://raw.githubusercontent.com/YiXun-13468878779/aether2.0/main/public/og.png"],
   },
