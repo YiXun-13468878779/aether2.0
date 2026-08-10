@@ -5,7 +5,8 @@ type IncomingMessage = {
   content: string;
 };
 
-const MODEL = process.env.OPENAI_MODEL || "gpt-5.6-sol";
+const MODEL = process.env.QWEN_MODEL || "qwen3.7-plus";
+const API_BASE_URL = (process.env.QWEN_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1").replace(/\/$/, "");
 
 const instructions = `你是 Aether，一个在自由创作空间中与用户认真交谈、观看作品的 AI。
 
@@ -35,39 +36,34 @@ const instructions = `你是 Aether，一个在自由创作空间中与用户认
 
 前台只会展示 message 和可选的 invitation。message 必须是一段自然交流文本，绝不提及 JSON、字段、规则或内部判断。`;
 
-const responseSchema = {
-  type: "object",
-  properties: {
-    message: { type: "string" },
-    invite_to_create: { type: "boolean" },
-    invitation: {
-      anyOf: [
-        {
-          type: "object",
-          properties: {
-            title: { type: "string" },
-            prompt: { type: "string" },
-          },
-          required: ["title", "prompt"],
-          additionalProperties: false,
-        },
-        { type: "null" },
-      ],
-    },
-    safety_level: { type: "string", enum: ["regular", "high"] },
-  },
-  required: ["message", "invite_to_create", "invitation", "safety_level"],
-  additionalProperties: false,
-};
+const outputRequirements = `只输出一个合法 JSON 对象，不要使用 Markdown 代码块，也不要在 JSON 前后添加文字。格式必须是：
+{
+  "message": "展示给用户的自然交流文本",
+  "invite_to_create": false,
+  "invitation": null,
+  "safety_level": "regular"
+}
+invite_to_create 只能是布尔值。需要邀请创作时，invitation 必须是包含 title 和 prompt 字符串的对象；否则必须是 null。safety_level 只能是 regular 或 high。`;
+
+function parseModelOutput(content: string) {
+  try {
+    return JSON.parse(content) as Record<string, unknown>;
+  } catch {
+    const start = content.indexOf("{");
+    const end = content.lastIndexOf("}");
+    if (start >= 0 && end > start) return JSON.parse(content.slice(start, end + 1)) as Record<string, unknown>;
+    return { message: content };
+  }
+}
 
 export async function GET() {
-  return NextResponse.json({ configured: Boolean(process.env.OPENAI_API_KEY), model: MODEL });
+  return NextResponse.json({ configured: Boolean(process.env.DASHSCOPE_API_KEY), model: MODEL });
 }
 
 export async function POST(request: NextRequest) {
-  if (!process.env.OPENAI_API_KEY) {
+  if (!process.env.DASHSCOPE_API_KEY) {
     return NextResponse.json(
-      { code: "MODEL_NOT_CONFIGURED", message: "真实模型尚未连接。请配置 OPENAI_API_KEY 后再开始对话；Aether 不会用预设内容冒充回答。" },
+      { code: "MODEL_NOT_CONFIGURED", message: "真实模型尚未连接。请配置 DASHSCOPE_API_KEY 后再开始对话；Aether 不会用预设内容冒充回答。" },
       { status: 503 },
     );
   }
@@ -93,65 +89,65 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ message: "作品图片过大，请缩小后重试。" }, { status: 413 });
     }
 
-    const input: Array<Record<string, unknown>> = messages.map((message) => ({ role: message.role, content: message.content }));
+    const apiMessages: Array<Record<string, unknown>> = [
+      { role: "system", content: `${instructions}\n\n${outputRequirements}` },
+      ...messages.map((message) => ({ role: message.role, content: message.content })),
+    ];
     if (body.mode === "artwork" && body.image) {
-      input.push({
+      apiMessages.push({
         role: "user",
         content: [
           {
-            type: "input_text",
+            type: "text",
             text: `这是当前 Session 中正在交流的作品。请结合已有对话完整观看，不要只描述线条。当前 Session 已有作品：${(body.artworkTitles ?? []).join("、") || "未命名"}。`,
           },
-          { type: "input_image", image_url: body.image, detail: "high" },
+          { type: "image_url", image_url: { url: body.image } },
         ],
       });
     }
 
-    const apiResponse = await fetch("https://api.openai.com/v1/responses", {
+    const apiResponse = await fetch(`${API_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        Authorization: `Bearer ${process.env.DASHSCOPE_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         model: MODEL,
-        instructions,
-        input,
-        reasoning: { effort: "low" },
-        text: {
-          verbosity: body.mode === "artwork" ? "high" : "medium",
-          format: { type: "json_schema", name: "aether_turn", strict: true, schema: responseSchema },
-        },
-        max_output_tokens: body.mode === "artwork" ? 1600 : 900,
-        store: false,
+        messages: apiMessages,
+        response_format: { type: "json_object" },
+        enable_thinking: false,
+        max_completion_tokens: body.mode === "artwork" ? 1800 : 900,
       }),
       signal: AbortSignal.timeout(50_000),
     });
 
     const raw = await apiResponse.json() as {
-      error?: { message?: string };
-      output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string; refusal?: string }> }>;
+      error?: { message?: string; code?: string };
+      choices?: Array<{ message?: { content?: string } }>;
     };
     if (!apiResponse.ok) throw new Error(raw.error?.message || "模型请求失败");
 
-    const content = raw.output?.flatMap((item) => item.type === "message" ? item.content ?? [] : []);
-    const refusal = content?.find((item) => item.type === "refusal")?.refusal;
-    if (refusal) return NextResponse.json({ message: refusal, inviteToCreate: false, invitation: null, safetyLevel: "regular" });
-    const outputText = content?.find((item) => item.type === "output_text")?.text;
+    const outputText = raw.choices?.[0]?.message?.content;
     if (!outputText) throw new Error("模型没有返回可用文本");
 
-    const parsed = JSON.parse(outputText) as {
-      message: string;
-      invite_to_create: boolean;
-      invitation: { title: string; prompt: string } | null;
-      safety_level: "regular" | "high";
-    };
+    const parsed = parseModelOutput(outputText);
+    const message = typeof parsed.message === "string" && parsed.message.trim()
+      ? parsed.message.trim()
+      : "我在这里。你愿意的话，可以再说一点。";
+    const inviteToCreate = parsed.invite_to_create === true;
+    const invitation = parsed.invitation && typeof parsed.invitation === "object"
+      ? parsed.invitation as { title?: unknown; prompt?: unknown }
+      : null;
+    const validInvitation = invitation && typeof invitation.title === "string" && typeof invitation.prompt === "string"
+      ? { title: invitation.title, prompt: invitation.prompt }
+      : null;
 
     return NextResponse.json({
-      message: parsed.message,
-      inviteToCreate: body.mode === "conversation" && parsed.invite_to_create,
-      invitation: body.mode === "conversation" && parsed.invite_to_create ? parsed.invitation : null,
-      safetyLevel: parsed.safety_level,
+      message,
+      inviteToCreate: body.mode === "conversation" && inviteToCreate && Boolean(validInvitation),
+      invitation: body.mode === "conversation" && inviteToCreate ? validInvitation : null,
+      safetyLevel: parsed.safety_level === "high" ? "high" : "regular",
     });
   } catch (error) {
     console.error("Aether model request failed", error);
