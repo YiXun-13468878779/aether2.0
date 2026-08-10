@@ -40,7 +40,7 @@ QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 
 - React + TypeScript + Vinext
 - 原生 Canvas API
-- OpenAI Responses API（文本对话、图像理解、Structured Outputs）
+- 阿里云百炼 OpenAI 兼容 Chat Completions API（Qwen 多轮对话、图像理解、JSON 输出）
 - localStorage（MVP 设备本地持久化）
 
 ## 产品原则
