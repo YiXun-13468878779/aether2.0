@@ -42,10 +42,10 @@ test("source keeps the conversation-first, multi-work and real-model contract", 
   assert.match(page, /<canvas/);
   assert.match(page, /src="\/og\.png"/);
 
-  assert.match(api, /api\.openai\.com\/v1\/responses/);
-  assert.match(api, /input_image/);
-  assert.match(api, /json_schema/);
-  assert.match(api, /store:\s*false/);
+  assert.match(api, /dashscope\.aliyuncs\.com\/compatible-mode\/v1/);
+  assert.match(api, /image_url/);
+  assert.match(api, /json_object/);
+  assert.match(api, /enable_thinking:\s*false/);
   assert.match(api, /MODEL_NOT_CONFIGURED/);
   assert.doesNotMatch(api, /mock|fake response/i);
 
