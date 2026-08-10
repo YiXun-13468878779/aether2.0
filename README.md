@@ -20,7 +20,7 @@ Aether 是一个受原生艺术精神启发的 AI 创作与作品交流空间。
 ```bash
 npm install
 cp .env.example .env.local
-# 在 .env.local 中填写 OPENAI_API_KEY
+# 在 .env.local 中填写阿里云百炼 API Key
 npm run dev
 ```
 
@@ -29,11 +29,12 @@ npm run dev
 ## 模型配置
 
 ```env
-OPENAI_API_KEY=your_api_key_here
-OPENAI_MODEL=gpt-5.6-sol
+DASHSCOPE_API_KEY=your_api_key_here
+QWEN_MODEL=qwen3.7-plus
+QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 ```
 
-服务端通过 OpenAI Responses API 调用真实多模态模型，画作以高细节图像输入发送；回答使用严格的结构化输出控制“自然回复 / 是否邀请创作 / 安全等级”，前台只展示自然语言和真正需要出现的创作邀请。请求设置 `store: false`，API Key 只存在服务端环境变量中。
+服务端通过阿里云百炼的 OpenAI 兼容 Chat Completions API 调用 `qwen3.7-plus`，把对话历史和当前画作一起交给原生多模态模型。JSON 输出控制“自然回复 / 是否邀请创作 / 安全等级”，前台只展示自然语言和真正需要出现的创作邀请。API Key 只存在服务端环境变量中。
 
 ## 技术栈
 
