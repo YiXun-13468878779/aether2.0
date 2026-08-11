@@ -12,6 +12,7 @@ Aether 是一个受原生艺术精神启发的 AI 创作与作品交流空间。
 - 完整画布：铅笔、画笔、马克笔、橡皮、直线、矩形、椭圆、颜色、透明度、纸张、缩放、撤销、重做、清空与图片上传
 - 多模态阅画：模型先把握整体构图与关系，再用多个具体细节支撑自己的感受和想象
 - 多 Session 与作品空间：旅程、对话和作品保存在当前设备，可随时回到其中继续
+- 邮箱验证登录：公开首页可浏览，登录后才能进入会话并调用 AI，账号由 Clerk 管理
 - 明确的模型状态：未配置真实 API 时会直接说明，不提供预设回复或假分析
 - 安全边界：不做心理诊断，不从画面推断人格或疾病；明确危机表达优先转向安全支持
 
@@ -20,7 +21,7 @@ Aether 是一个受原生艺术精神启发的 AI 创作与作品交流空间。
 ```bash
 npm install
 cp .env.example .env.local
-# 在 .env.local 中填写阿里云百炼 API Key
+# 在 .env.local 中填写阿里云百炼与 Clerk 环境变量
 npm run dev
 ```
 
@@ -32,13 +33,18 @@ npm run dev
 DASHSCOPE_API_KEY=your_api_key_here
 QWEN_MODEL=qwen3.7-plus
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+CLERK_SECRET_KEY=your_clerk_secret_key
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
 ```
 
 服务端通过阿里云百炼的 OpenAI 兼容 Chat Completions API 调用 `qwen3.7-plus`，把对话历史和当前画作一起交给原生多模态模型。JSON 输出控制“自然回复 / 是否邀请创作 / 安全等级”，前台只展示自然语言和真正需要出现的创作邀请。API Key 只存在服务端环境变量中。
 
+Clerk 提供邮箱验证、会话和账户菜单。`/api/aether` 同时由 Next.js Proxy 与 Route Handler 校验登录状态，匿名请求不会触发模型调用。Vercel Marketplace 安装 Clerk 后会自动注入认证环境变量。
+
 ## 技术栈
 
-- React + TypeScript + Vinext
+- Next.js 16 App Router + React 19 + TypeScript
+- Clerk（邮箱验证与服务端会话鉴权）
 - 原生 Canvas API
 - 阿里云百炼 OpenAI 兼容 Chat Completions API（Qwen 多轮对话、图像理解、JSON 输出）
 - localStorage（MVP 设备本地持久化）
