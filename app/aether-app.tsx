@@ -35,6 +35,7 @@ type Artwork = {
 type Journey = {
   id: string;
   title: string;
+  favorite?: boolean;
   phase: Phase;
   createdAt: string;
   updatedAt: string;
@@ -127,7 +128,7 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
   const [requestError, setRequestError] = useState("");
   const [tool, setTool] = useState<Tool>("brush");
   const [color, setColor] = useState("#5945bd");
-  const [size, setSize] = useState(15);
+  const [size, setSize] = useState(6);
   const [opacity, setOpacity] = useState(86);
   const [zoom, setZoom] = useState(1);
   const [savedState, setSavedState] = useState("已保存在此设备");
@@ -239,6 +240,30 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
     setScreen("session");
     setRequestError("");
     setSessionSidebarOpen(false);
+  }
+
+  function toggleJourneyFavorite(journeyId: string) {
+    setJourneys((current) => current.map((journey) => journey.id === journeyId
+      ? { ...journey, favorite: !journey.favorite }
+      : journey));
+  }
+
+  function deleteJourney(journeyId: string) {
+    const journey = journeys.find((item) => item.id === journeyId);
+    if (!journey) return;
+    const artworkNote = journey.artworks.length ? `，其中的 ${journey.artworks.length} 幅作品也会一起移除` : "";
+    if (!window.confirm(`删除“${journey.title || "未命名对话"}”${artworkNote}？此操作无法撤回。`)) return;
+
+    const remaining = journeys.filter((item) => item.id !== journeyId);
+    if (!remaining.length) {
+      const replacement = makeJourney();
+      setJourneys([replacement]);
+      setActiveJourneyId(replacement.id);
+    } else {
+      setJourneys(remaining);
+      if (activeJourneyId === journeyId) setActiveJourneyId(remaining[0].id);
+    }
+    setRequestError("");
   }
 
   function nextQuestionPreference(text: string) {
@@ -720,18 +745,29 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
   }
 
   function renderSessionSidebar() {
+    const orderedJourneys = [
+      ...journeys.filter((journey) => journey.favorite),
+      ...journeys.filter((journey) => !journey.favorite),
+    ];
+
     return (
       <aside className={`session-sidebar${sessionSidebarOpen ? " open" : ""}`} aria-label="对话记录">
         <div className="session-sidebar-head"><div><span>JOURNEYS</span><strong>对话记录</strong></div><button className="session-sidebar-close" onClick={() => setSessionSidebarOpen(false)} aria-label="关闭对话记录">×</button></div>
         <button className="new-session-button" onClick={startNewJourney}><span>＋</span><strong>开启新对话</strong></button>
         <div className="session-list">
-          {journeys.map((journey) => {
+          {orderedJourneys.map((journey) => {
             const lastUserMessage = [...journey.messages].reverse().find((message) => message.role === "user");
             return (
-              <button key={journey.id} className={journey.id === activeJourney.id ? "active" : ""} onClick={() => openJourney(journey.id)}>
-                <span className="session-list-orb" />
-                <span className="session-list-copy"><strong>{journey.title || "未命名对话"}</strong><small>{lastUserMessage?.text || "还没有开始交谈"}</small><i>{shortDate(journey.updatedAt)} · {journey.phase === "completed" ? "已结束" : `${journey.artworks.length} 幅作品`}</i></span>
-              </button>
+              <div key={journey.id} className={`session-list-item${journey.id === activeJourney.id ? " active" : ""}${journey.favorite ? " favorite" : ""}`}>
+                <button className="session-open" onClick={() => openJourney(journey.id)} aria-label={`打开对话：${journey.title || "未命名对话"}`}>
+                  <span className="session-list-orb" />
+                  <span className="session-list-copy"><strong>{journey.title || "未命名对话"}</strong><small>{lastUserMessage?.text || "还没有开始交谈"}</small><i>{shortDate(journey.updatedAt)} · {journey.phase === "completed" ? "已结束" : `${journey.artworks.length} 幅作品`}</i></span>
+                </button>
+                <div className="session-item-actions">
+                  <button className={journey.favorite ? "favorite active" : "favorite"} onClick={() => toggleJourneyFavorite(journey.id)} aria-label={journey.favorite ? "取消收藏对话" : "收藏对话"} aria-pressed={journey.favorite} title={journey.favorite ? "取消收藏" : "收藏并置顶"}>{journey.favorite ? "★" : "☆"}</button>
+                  <button className="delete" onClick={() => deleteJourney(journey.id)} aria-label={`删除对话：${journey.title || "未命名对话"}`} title="删除对话">删</button>
+                </div>
+              </div>
             );
           })}
         </div>
@@ -865,7 +901,13 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
                   {["#19171d", "#5945bd", "#2e67c7", "#b74471", "#d77a35", "#5d967c", "#d7bc55"].map((swatch) => <button key={swatch} className={color === swatch ? "selected" : ""} style={{ background: swatch }} onClick={() => { setColor(swatch); if (tool === "eraser") setTool("brush"); }} aria-label={`颜色 ${swatch}`} />)}
                   <label className="color-picker">＋<input type="color" value={color} onChange={(event) => setColor(event.target.value)} /></label>
                 </div>
-                <label>笔触 <input type="range" min="2" max="56" value={size} onChange={(event) => setSize(Number(event.target.value))} /></label>
+                <div className="stroke-control">
+                  <span>笔触</span>
+                  <button onClick={() => setSize((current) => Math.max(1, current - 1))} aria-label="减小笔触">−</button>
+                  <input type="range" min="1" max="40" step="1" value={size} onChange={(event) => setSize(Number(event.target.value))} aria-label="笔触粗细" />
+                  <output>{size}px</output>
+                  <button onClick={() => setSize((current) => Math.min(40, current + 1))} aria-label="增大笔触">＋</button>
+                </div>
                 <label>透明度 <input type="range" min="12" max="100" value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} /></label>
                 <label className="background-picker">纸张 <input type="color" value={activeArtwork?.background ?? PAPER} onChange={(event) => changeBackground(event.target.value)} /></label>
                 <div className="zoom-control"><button onClick={() => setZoom(Math.max(.65, zoom - .1))}>−</button><span>{Math.round(zoom * 100)}%</span><button onClick={() => setZoom(Math.min(1.35, zoom + .1))}>＋</button></div>
