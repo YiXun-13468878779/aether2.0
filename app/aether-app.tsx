@@ -133,6 +133,7 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
   const [zoom, setZoom] = useState(1);
   const [savedState, setSavedState] = useState("已保存在此设备");
   const [sessionSidebarOpen, setSessionSidebarOpen] = useState(false);
+  const [openJourneyMenuId, setOpenJourneyMenuId] = useState("");
 
   const activeJourney = journeys.find((journey) => journey.id === activeJourneyId) ?? journeys[0];
   const activeArtwork = activeJourney?.artworks.find((artwork) => artwork.id === activeJourney.activeArtworkId);
@@ -206,6 +207,26 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
     conversationEndRef.current?.scrollIntoView({ block: "end" });
   }, [screen, activeJourney?.phase, activeJourney?.messages]);
 
+  useEffect(() => {
+    if (!openJourneyMenuId) return;
+
+    function closeJourneyMenu(event: globalThis.PointerEvent) {
+      if (event.target instanceof Element && event.target.closest("[data-session-menu]")) return;
+      setOpenJourneyMenuId("");
+    }
+
+    function closeJourneyMenuWithKeyboard(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpenJourneyMenuId("");
+    }
+
+    window.addEventListener("pointerdown", closeJourneyMenu);
+    window.addEventListener("keydown", closeJourneyMenuWithKeyboard);
+    return () => {
+      window.removeEventListener("pointerdown", closeJourneyMenu);
+      window.removeEventListener("keydown", closeJourneyMenuWithKeyboard);
+    };
+  }, [openJourneyMenuId]);
+
   function updateJourney(id: string, update: Partial<Journey>) {
     setJourneys((current) => current.map((journey) => journey.id === id ? { ...journey, ...update, updatedAt: now() } : journey));
   }
@@ -246,11 +267,13 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
     setJourneys((current) => current.map((journey) => journey.id === journeyId
       ? { ...journey, favorite: !journey.favorite }
       : journey));
+    setOpenJourneyMenuId("");
   }
 
   function deleteJourney(journeyId: string) {
     const journey = journeys.find((item) => item.id === journeyId);
     if (!journey) return;
+    setOpenJourneyMenuId("");
     const artworkNote = journey.artworks.length ? `，其中的 ${journey.artworks.length} 幅作品也会一起移除` : "";
     if (!window.confirm(`删除“${journey.title || "未命名对话"}”${artworkNote}？此操作无法撤回。`)) return;
 
@@ -763,9 +786,26 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
                   <span className="session-list-orb" />
                   <span className="session-list-copy"><strong>{journey.title || "未命名对话"}</strong><small>{lastUserMessage?.text || "还没有开始交谈"}</small><i>{shortDate(journey.updatedAt)} · {journey.phase === "completed" ? "已结束" : `${journey.artworks.length} 幅作品`}</i></span>
                 </button>
-                <div className="session-item-actions">
-                  <button className={journey.favorite ? "favorite active" : "favorite"} onClick={() => toggleJourneyFavorite(journey.id)} aria-label={journey.favorite ? "取消收藏对话" : "收藏对话"} aria-pressed={journey.favorite} title={journey.favorite ? "取消收藏" : "收藏并置顶"}>{journey.favorite ? "★" : "☆"}</button>
-                  <button className="delete" onClick={() => deleteJourney(journey.id)} aria-label={`删除对话：${journey.title || "未命名对话"}`} title="删除对话">删</button>
+                <div className="session-item-menu" data-session-menu>
+                  <button
+                    className="session-menu-trigger"
+                    onClick={() => setOpenJourneyMenuId((current) => current === journey.id ? "" : journey.id)}
+                    aria-label={`管理对话：${journey.title || "未命名对话"}`}
+                    aria-haspopup="menu"
+                    aria-expanded={openJourneyMenuId === journey.id}
+                  >…</button>
+                  {openJourneyMenuId === journey.id && (
+                    <div className="session-menu-popover" role="menu" aria-label={`管理“${journey.title || "未命名对话"}”`}>
+                      <button role="menuitem" onClick={() => toggleJourneyFavorite(journey.id)}>
+                        <span aria-hidden="true">{journey.favorite ? "★" : "☆"}</span>
+                        {journey.favorite ? "取消收藏" : "收藏对话"}
+                      </button>
+                      <button className="danger" role="menuitem" onClick={() => deleteJourney(journey.id)}>
+                        <span aria-hidden="true">×</span>
+                        删除对话
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             );
