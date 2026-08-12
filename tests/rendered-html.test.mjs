@@ -36,7 +36,11 @@ test("source keeps the conversation-first, multi-work and real-model contract", 
   assert.match(page, /结束当前对话/);
   assert.match(page, /toggleJourneyFavorite/);
   assert.match(page, /deleteJourney/);
-  assert.match(page, /收藏并置顶/);
+  assert.match(page, /管理对话/);
+  assert.match(page, /session-menu-popover/);
+  assert.match(page, /收藏对话/);
+  assert.match(page, /取消收藏/);
+  assert.match(page, /删除对话/);
   assert.match(page, /min="1" max="40"/);
   assert.match(page, /减小笔触/);
   assert.match(page, /preferences:\s*\{ avoidQuestions \}/);
