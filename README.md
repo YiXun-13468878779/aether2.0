@@ -16,6 +16,13 @@ Aether 是一个受原生艺术精神启发的 AI 创作与作品交流空间。
 - 明确的模型状态：未配置真实 API 时会直接说明，不提供预设回复或假分析
 - 安全边界：不做心理诊断，不从画面推断人格或疾病；明确危机表达优先转向安全支持
 
+## 效果截图
+<img width="2102" height="1234" alt="image" src="https://github.com/user-attachments/assets/5639919a-c118-4d29-a7a9-9f3f6c28c4df" />
+<img width="2108" height="1243" alt="image" src="https://github.com/user-attachments/assets/26a06637-0424-41ee-b5fb-6a97475d7fc2" />
+<img width="2090" height="1224" alt="image" src="https://github.com/user-attachments/assets/b43c9838-027b-47e9-99eb-30bfc8d3f584" />
+<img width="2087" height="1234" alt="image" src="https://github.com/user-attachments/assets/ddf57d1a-ccdc-4fda-90c5-13d27b48c694" />
+
+
 ## 本地运行
 
 ```bash
