@@ -1,19 +1,7 @@
 import type { Metadata } from "next";
-import { Noto_Sans_SC, Noto_Serif_SC } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
-
-const sans = Noto_Sans_SC({
-  variable: "--font-sans",
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600"],
-});
-
-const serif = Noto_Serif_SC({
-  variable: "--font-serif",
-  subsets: ["latin"],
-  weight: ["400", "500"],
-});
+import "./experience.css";
 
 const siteUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
   ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
@@ -52,8 +40,8 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
 
   return (
     <html lang="zh-CN">
-      <body className={`${sans.variable} ${serif.variable}`}>
-        {authEnabled ? <ClerkProvider>{children}</ClerkProvider> : children}
+      <body className="aether-fonts">
+        {authEnabled ? <ClerkProvider signInUrl="/sign-in" signUpUrl="/sign-up">{children}</ClerkProvider> : children}
       </body>
     </html>
   );
