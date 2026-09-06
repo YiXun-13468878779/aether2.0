@@ -1,0 +1,106 @@
+/* Creative journey preview: typography and responsive entry point. */
+.aether-fonts {
+  --font-sans: "PingFang SC", "Microsoft YaHei", system-ui;
+  --font-serif: "Songti SC", "STSong", Georgia;
+}
+:where(button, a, input, textarea, select):focus-visible {
+  outline: 2px solid #b6a0ec;
+  outline-offset: 4px;
+}
+.home-screen {
+  min-height: 620px;
+  height: 100svh;
+  background: radial-gradient(ellipse at 68% 55%, #37273c 0, #141322 32%, #090a12 67%);
+}
+/* The legacy cover includes baked-in text. Use only its blurred atmosphere. */
+.home-cover { opacity: .2; filter: blur(25px); transform: scale(1.16); }
+.home-shade {
+  background: radial-gradient(ellipse at 50% 38%, transparent, rgba(7,8,15,.7)), linear-gradient(0deg, #080912, transparent 50%);
+}
+.home-nav, .home-footer { z-index: 3; }
+.home-entry {
+  inset: 0;
+  padding: 116px 24px 90px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  text-align: center;
+}
+.home-intro { margin-bottom: 28px; }
+.home-intro > span { color: #b7a7c7; font-size: 11px; letter-spacing: .48em; }
+.home-intro h1 {
+  margin: 24px 0;
+  color: #f4eef8;
+  font-family: var(--font-serif), serif;
+  font-size: clamp(44px, 6vw, 78px);
+  font-weight: 400;
+  letter-spacing: .2em;
+  text-indent: .2em;
+  text-shadow: 0 0 70px rgba(182,137,223,.24);
+}
+.home-intro p { margin: 0; color: #b8afc7; font-size: 14px; line-height: 1.9; letter-spacing: .12em; }
+.home-entry > button:first-of-type {
+  min-width: 214px;
+  min-height: 52px;
+  padding: 0 26px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+  border: 1px solid rgba(204,177,234,.34);
+  border-radius: 3px;
+  background: rgba(152,119,185,.1);
+  color: #ede5f7;
+  font-size: 14px;
+  letter-spacing: .08em;
+  transition: background .2s, border-color .2s;
+}
+.home-entry > button:first-of-type:hover { background: rgba(152,119,185,.22); border-color: #a88dbd; }
+.home-entry > small { color: #aaa0b8; font-size: 12px; }
+.home-entry .continue-link { min-height: 44px; color: #c2b5d0; font-size: 12px; }
+.home-login-link, .home-space-link { min-height: 44px; font-size: 12px; }
+.home-footer { color: #a298ac; font-size: 10px; }
+.dialogue-column { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+.dialogue-intro { padding-top: 35px; padding-bottom: 20px; }
+.manual-create { padding: 12px 25px 0; display: flex; align-items: center; gap: 16px; }
+.manual-create button {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid rgba(181,159,218,.22);
+  border-radius: 4px;
+  color: #d8cce8;
+  background: rgba(181,159,218,.05);
+  font-size: 12px;
+}
+.manual-create button span { margin-left: 12px; }
+.manual-create small { color: #8e839c; font-size: 11px; }
+.turn-content > p { font-size: 14px; line-height: 1.95; }
+.composer form { grid-template-columns: minmax(0, 1fr) 44px; }
+.composer form > button { width: 44px; height: 44px; }
+.composer textarea { font-size: 14px; line-height: 1.7; }
+.session-sidebar-foot { display: grid; gap: 7px; }
+.session-sidebar-foot button { min-height: 40px; font-size: 11px; }
+.session-sidebar-foot small { color: #a399ae; font-size: 10px; }
+.request-error { overflow-wrap: anywhere; }
+@media (max-width: 680px) {
+  .home-screen { min-height: 560px; }
+  .home-nav { height: 72px; padding: 0 22px; }
+  .home-nav-actions { gap: 8px; }
+  .home-entry { inset: 0; padding: 104px 22px 82px; }
+  .home-intro { margin-bottom: 20px; }
+  .home-intro p { max-width: 260px; font-size: 13px; }
+  .home-footer { left: 22px; right: 22px; bottom: 22px; gap: 12px; }
+  .dialogue-column { width: 100%; }
+  .dialogue-intro { padding: 24px 20px 18px; }
+  .dialogue-intro h1 { font-size: 25px; }
+  .manual-create { padding: 10px 20px 0; gap: 10px; flex-wrap: wrap; }
+  .manual-create small { display: none; }
+  .conversation-stream { padding: 22px 20px 28px; }
+  .composer textarea { font-size: 16px; }
+  .session-header-actions button, .session-list-toggle { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
+}

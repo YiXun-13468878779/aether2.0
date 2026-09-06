@@ -2,7 +2,8 @@
 /* eslint-disable @next/next/no-img-element -- local cover and user-created data URLs intentionally bypass image optimization */
 
 import { ChangeEvent, FormEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Show, SignInButton, UserButton } from "@clerk/nextjs";
+import { Show, UserButton } from "@clerk/nextjs";
+import Link from "next/link";
 
 type Role = "assistant" | "user";
 type Tool = "pencil" | "brush" | "marker" | "eraser" | "line" | "rectangle" | "ellipse";
@@ -42,7 +43,7 @@ type Journey = {
   messages: Message[];
   artworks: Artwork[];
   activeArtworkId?: string;
-  preferences?: { avoidQuestions?: boolean };
+  preferences?: { avoidQuestions?: boolean; questionStyle?: "natural" | "fewer" | "none" };
   completedAt?: string;
 };
 
@@ -51,7 +52,7 @@ type ModelStatus = "checking" | "connected" | "missing";
 const WIDTH = 1200;
 const HEIGHT = 780;
 const PAPER = "#f6f1e7";
-const STORAGE_KEY = "aether-journeys-v2";
+
 
 const openingMessage: Message = {
   id: "opening",
@@ -113,7 +114,10 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
   const shapeSnapshotRef = useRef<ImageData | null>(null);
   const historyRef = useRef<string[]>([]);
   const redoRef = useRef<string[]>([]);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const restoreGenerationRef = useRef(0);
+  const canvasReadyRef = useRef(false);
+  const requestRef = useRef<AbortController | null>(null);
+  const restoreFileRef = useRef<HTMLInputElement>(null);
   const conversationEndRef = useRef<HTMLDivElement>(null);
 
   const [screen, setScreen] = useState<Screen>("home");
@@ -131,33 +135,47 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
   const [size, setSize] = useState(6);
   const [opacity, setOpacity] = useState(86);
   const [zoom, setZoom] = useState(1);
-  const [savedState, setSavedState] = useState("已保存在此设备");
+  const [savedState, setSavedState] = useState("体验暂存 · 刷新前请导出旅程");
   const [sessionSidebarOpen, setSessionSidebarOpen] = useState(false);
   const [openJourneyMenuId, setOpenJourneyMenuId] = useState("");
 
   const activeJourney = journeys.find((journey) => journey.id === activeJourneyId) ?? journeys[0];
   const activeArtwork = activeJourney?.artworks.find((artwork) => artwork.id === activeJourney.activeArtworkId);
 
-  useEffect(() => {
-    const hydrationTimer = window.setTimeout(() => {
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        const parsed = saved ? (JSON.parse(saved) as Journey[]) : [];
-        const initial = parsed.length ? parsed : [makeJourney()];
-        setJourneys(initial);
-        setActiveJourneyId(initial[0].id);
-      } catch {
-        const first = makeJourney();
-        setJourneys([first]);
-        setActiveJourneyId(first.id);
-      }
-    }, 0);
+  function context() {
+    return canvasRef.current?.getContext("2d", { willReadFrequently: true }) ?? null;
+  }
 
-    return () => window.clearTimeout(hydrationTimer);
+  function restoreCanvas(dataUrl: string, onRestored?: () => void) {
+    const ctx = context();
+    if (!ctx) return;
+    const generation = ++restoreGenerationRef.current;
+    canvasReadyRef.current = false;
+    const image = new Image();
+    image.onload = () => {
+      if (generation !== restoreGenerationRef.current || ctx.canvas !== canvasRef.current) return;
+      ctx.clearRect(0, 0, WIDTH, HEIGHT);
+      ctx.drawImage(image, 0, 0, WIDTH, HEIGHT);
+      canvasReadyRef.current = true;
+      onRestored?.();
+    };
+    image.onerror = () => {
+      if (generation === restoreGenerationRef.current) setRequestError("这幅作品暂时无法读取，请重新导入。");
+    };
+    image.src = dataUrl;
+  }
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const first = makeJourney();
+      setJourneys([first]);
+      setActiveJourneyId(first.id);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
-    if (!authEnabled || screen === "home") return;
+    if (screen === "home") return;
 
     fetch("/api/aether")
       .then((response) => {
@@ -169,33 +187,39 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
         setModelName(data.model ?? "");
       })
       .catch(() => setModelStatus("missing"));
-  }, [authEnabled, screen]);
-
-  useEffect(() => {
-    if (!journeys.length) return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(journeys));
-    } catch {
-      window.setTimeout(() => setSavedState("设备存储空间不足，请导出作品"), 0);
-    }
-  }, [journeys]);
+  }, [screen]);
 
   useEffect(() => {
     if (screen !== "session" || activeJourney?.phase !== "creating" || !activeArtwork) return;
-    const timer = window.setTimeout(() => {
-      const ctx = context();
-      if (!ctx) return;
-      ctx.clearRect(0, 0, WIDTH, HEIGHT);
-      ctx.fillStyle = activeArtwork.background;
-      ctx.fillRect(0, 0, WIDTH, HEIGHT);
-      if (activeArtwork.image) restoreCanvas(activeArtwork.image);
-      historyRef.current = [];
-      redoRef.current = [];
-    }, 40);
-    return () => window.clearTimeout(timer);
-    // Canvas restoration is intentionally keyed to artwork switches, not every autosave.
+    canvasReadyRef.current = false;
+    const generation = ++restoreGenerationRef.current;
+    const ctx = context();
+    if (!ctx) return;
+    ctx.clearRect(0, 0, WIDTH, HEIGHT);
+    ctx.fillStyle = activeArtwork.background;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    historyRef.current = [];
+    redoRef.current = [];
+    if (activeArtwork.image) restoreCanvas(activeArtwork.image);
+    else canvasReadyRef.current = true;
+    return () => {
+      if (restoreGenerationRef.current >= generation) restoreGenerationRef.current = restoreGenerationRef.current + 1;
+      canvasReadyRef.current = false;
+    };
+    // Restore only on navigation, never on the snapshot update it triggers.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, activeJourneyId, activeJourney?.phase, activeArtwork?.id]);
+
+  useEffect(() => () => { requestRef.current?.abort(); }, []);
+
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (!journeys.some((journey) => journey.messages.length > 1 || journey.artworks.length)) return;
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [journeys]);
 
   const galleryWorks = useMemo(
     () => journeys.flatMap((journey) => journey.artworks.map((artwork) => ({ journey, artwork }))).filter(({ artwork }) => artwork.image),
@@ -242,6 +266,12 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
   }
 
   function startNewJourney() {
+    saveCanvasNow();
+    stopResponse();
+    if (activeJourney?.messages.length === 1 && !activeJourney.artworks.length) {
+      setScreen("session");
+      return;
+    }
     const journey = makeJourney();
     setJourneys((current) => [journey, ...current]);
     setActiveJourneyId(journey.id);
@@ -251,6 +281,7 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
   }
 
   function openJourney(journeyId: string, phase?: Phase, artworkId?: string) {
+    stopResponse();
     if (activeJourney?.phase === "creating") saveCanvasNow();
     setActiveJourneyId(journeyId);
     if (phase || artworkId) {
@@ -289,23 +320,44 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
     setRequestError("");
   }
 
-  function nextQuestionPreference(text: string) {
-    if (/可以(继续)?问|你可以问|可以提问/.test(text)) return false;
-    if (/不要(再)?问|别(再)?问|不想(被)?问|少问|别老是问|不喜欢.*问/.test(text)) return true;
-    return activeJourney?.preferences?.avoidQuestions === true;
+  function nextQuestionStyle(text: string): "natural" | "fewer" | "none" {
+    if (/少问|不要总是问|别老是问/.test(text)) return "fewer";
+    if (/可以(继续)?问|你可以问|可以提问/.test(text)) return "natural";
+    if (/不要(再)?问|别(再)?问|不想(被)?问|不喜欢.*问/.test(text)) return "none";
+    return activeJourney?.preferences?.questionStyle ?? (activeJourney?.preferences?.avoidQuestions ? "none" : "natural");
+  }
+
+  async function modelImage(dataUrl?: string) {
+    if (!dataUrl) return undefined;
+    const image = new Image();
+    image.src = dataUrl;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    const scale = Math.min(1, 1024 / Math.max(image.width, image.height));
+    canvas.width = Math.max(1, Math.round(image.width * scale));
+    canvas.height = Math.max(1, Math.round(image.height * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("作品暂时无法读取。");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.8);
   }
 
   async function askAether(text: string, image?: string, phaseOverride?: Phase) {
-    if (!activeJourney || thinking) return;
+    if (!activeJourney || requestRef.current) return;
     const journeyId = activeJourney.id;
+    const requestController = new AbortController();
+    requestRef.current = requestController;
     const userMessage: Message = { id: crypto.randomUUID(), role: "user", text };
     const nextMessages = [...activeJourney.messages, userMessage];
-    const avoidQuestions = nextQuestionPreference(text);
+    const questionStyle = nextQuestionStyle(text);
+    const avoidQuestions = questionStyle === "none";
     const shouldNameJourney = activeJourney.title === "一段新的对话"
       && activeJourney.messages.every((message) => message.role !== "user");
     updateJourney(journeyId, {
       messages: nextMessages,
-      preferences: { ...activeJourney.preferences, avoidQuestions },
+      preferences: { ...activeJourney.preferences, avoidQuestions, questionStyle },
       ...(shouldNameJourney ? { title: text.replace(/\s+/g, " ").slice(0, 18) } : {}),
     });
     setInput("");
@@ -325,15 +377,17 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
     }));
 
     try {
+      const modelArtworks = await Promise.all(contextArtworks.map(async (artwork) => ({ ...artwork, image: await modelImage(artwork.image) })));
       const response = await fetch("/api/aether", {
         method: "POST",
+        signal: requestController.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mode: image ? "artwork" : "conversation",
           phase: phaseOverride ?? activeJourney.phase,
-          messages: nextMessages.map(({ role, text: content }) => ({ role, content })),
-          artworks: contextArtworks,
-          preferences: { avoidQuestions },
+          messages: nextMessages.slice(-24).map(({ role, text: content }) => ({ role, content: content.slice(0, 8000) })),
+          artworks: modelArtworks,
+          preferences: { avoidQuestions, questionStyle },
         }),
       });
       if (!response.ok) {
@@ -362,6 +416,7 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
       let streamError = "";
 
       const handleEvent = (block: string) => {
+        if (requestRef.current !== requestController) return;
         const dataLine = block.split(/\r?\n/).find((line) => line.startsWith("data:"));
         if (!dataLine) return;
         const payload = dataLine.slice(5).trim();
@@ -411,11 +466,29 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
       if (streamError) throw new Error(streamError);
       if (!fullText.trim()) throw new Error("Aether 没有留下完整回应，请再试一次。");
     } catch (error) {
-      setRequestError(error instanceof Error ? error.message : "Aether 暂时没有回应，请稍后再试。");
+      if (!requestController.signal.aborted && requestRef.current === requestController) {
+        setRequestError(error instanceof Error ? error.message : "Aether 暂时没有回应，请稍后再试。");
+      }
     } finally {
-      setThinking(false);
-      setStreamingMessageId("");
+      if (requestRef.current === requestController) {
+        requestRef.current = null;
+        setThinking(false);
+        setStreamingMessageId("");
+      }
     }
+  }
+
+  function stopResponse() {
+    requestRef.current?.abort();
+    requestRef.current = null;
+    setThinking(false);
+    setStreamingMessageId("");
+  }
+
+  function navigateTo(next: Screen) {
+    saveCanvasNow();
+    stopResponse();
+    setScreen(next);
   }
 
   function submitMessage(event: FormEvent) {
@@ -445,11 +518,9 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
     if (!activeJourney) return;
     saveCanvasNow();
     const artwork = makeArtwork(activeJourney.artworks.length);
-    updateJourney(activeJourney.id, {
-      phase: "creating",
-      artworks: [...activeJourney.artworks, artwork],
-      activeArtworkId: artwork.id,
-    });
+    setJourneys((current) => current.map((journey) => journey.id === activeJourney.id
+      ? { ...journey, phase: "creating", artworks: [...journey.artworks, artwork], activeArtworkId: artwork.id, updatedAt: now() }
+      : journey));
   }
 
   function addArtwork() {
@@ -458,36 +529,24 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
 
   function duplicateArtwork() {
     if (!activeJourney || !activeArtwork) return;
-    saveCanvasNow();
+    const snapshot = saveCanvasNow();
     const copy: Artwork = {
       ...activeArtwork,
+      image: snapshot ?? activeArtwork.image,
       id: crypto.randomUUID(),
       title: `${activeArtwork.title} · 续`,
       createdAt: now(),
       updatedAt: now(),
     };
-    updateJourney(activeJourney.id, { artworks: [...activeJourney.artworks, copy], activeArtworkId: copy.id });
+    setJourneys((current) => current.map((journey) => journey.id === activeJourney.id
+      ? { ...journey, artworks: [...journey.artworks, copy], activeArtworkId: copy.id, updatedAt: now() }
+      : journey));
   }
 
   function switchArtwork(artworkId: string) {
     if (!activeJourney) return;
     saveCanvasNow();
     updateJourney(activeJourney.id, { activeArtworkId: artworkId });
-  }
-
-  function context() {
-    return canvasRef.current?.getContext("2d", { willReadFrequently: true }) ?? null;
-  }
-
-  function restoreCanvas(dataUrl: string) {
-    const ctx = context();
-    if (!ctx) return;
-    const image = new Image();
-    image.onload = () => {
-      ctx.clearRect(0, 0, WIDTH, HEIGHT);
-      ctx.drawImage(image, 0, 0, WIDTH, HEIGHT);
-    };
-    image.src = dataUrl;
   }
 
   function point(event: PointerEvent<HTMLCanvasElement>) {
@@ -501,7 +560,7 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
   function pushHistory() {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    historyRef.current.push(canvas.toDataURL("image/jpeg", 0.88));
+    historyRef.current.push(canvas.toDataURL("image/png"));
     if (historyRef.current.length > 30) historyRef.current.shift();
     redoRef.current = [];
   }
@@ -518,13 +577,22 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
 
   function beginDrawing(event: PointerEvent<HTMLCanvasElement>) {
     const ctx = context();
-    if (!ctx) return;
+    if (!ctx || !canvasReadyRef.current || !event.isPrimary) return;
     pushHistory();
     drawingRef.current = true;
     const position = point(event);
     startRef.current = position;
     lastRef.current = position;
     if (["line", "rectangle", "ellipse"].includes(tool)) shapeSnapshotRef.current = ctx.getImageData(0, 0, WIDTH, HEIGHT);
+    if (!["line", "rectangle", "ellipse"].includes(tool)) {
+      ctx.save();
+      strokeStyle(ctx);
+      ctx.beginPath();
+      ctx.moveTo(position.x, position.y);
+      ctx.lineTo(position.x + 0.01, position.y + 0.01);
+      ctx.stroke();
+      ctx.restore();
+    }
     event.currentTarget.setPointerCapture(event.pointerId);
   }
 
@@ -574,35 +642,32 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
   }
 
   function scheduleSave() {
-    setSavedState("正在保存…");
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      saveCanvasNow();
-      setSavedState("已保存在此设备");
-    }, 420);
+    // Capture now. A delayed callback must never read a different artwork's canvas.
+    saveCanvasNow();
   }
 
-  function saveCanvasNow() {
-    if (!activeJourney || !activeArtwork || !canvasRef.current) return;
-    patchArtwork(activeJourney.id, activeArtwork.id, { image: canvasRef.current.toDataURL("image/jpeg", 0.84) });
+  function saveCanvasNow(): string | undefined {
+    if (screen !== "session" || activeJourney?.phase !== "creating" || !activeArtwork || !canvasRef.current || !canvasReadyRef.current) return;
+    const image = canvasRef.current.toDataURL("image/png");
+    patchArtwork(activeJourney.id, activeArtwork.id, { image });
+    setSavedState("体验暂存 · 刷新前请导出旅程");
+    return image;
   }
 
   function undo() {
     const canvas = canvasRef.current;
     const previous = historyRef.current.pop();
     if (!canvas || !previous) return;
-    redoRef.current.push(canvas.toDataURL("image/jpeg", 0.88));
-    restoreCanvas(previous);
-    window.setTimeout(scheduleSave, 100);
+    redoRef.current.push(canvas.toDataURL("image/png"));
+    restoreCanvas(previous, scheduleSave);
   }
 
   function redo() {
     const canvas = canvasRef.current;
     const next = redoRef.current.pop();
     if (!canvas || !next) return;
-    historyRef.current.push(canvas.toDataURL("image/jpeg", 0.88));
-    restoreCanvas(next);
-    window.setTimeout(scheduleSave, 100);
+    historyRef.current.push(canvas.toDataURL("image/png"));
+    restoreCanvas(next, scheduleSave);
   }
 
   function clearCanvas() {
@@ -643,26 +708,44 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
 
   function uploadArtwork(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
-    const ctx = context();
-    if (!file || !ctx) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const image = new Image();
-      image.onload = () => {
-        pushHistory();
-        const background = activeArtwork?.background ?? PAPER;
-        ctx.fillStyle = background;
-        ctx.fillRect(0, 0, WIDTH, HEIGHT);
-        const scale = Math.min(WIDTH / image.width, HEIGHT / image.height);
-        const width = image.width * scale;
-        const height = image.height * scale;
-        ctx.drawImage(image, (WIDTH - width) / 2, (HEIGHT - height) / 2, width, height);
-        scheduleSave();
-      };
-      image.src = String(reader.result);
-    };
-    reader.readAsDataURL(file);
     event.target.value = "";
+    const ctx = context();
+    if (!file || !ctx || !canvasReadyRef.current) return;
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size > 10_000_000) {
+      setRequestError("请使用 10MB 以内的 PNG、JPG 或 WebP 图片。");
+      return;
+    }
+    const generation = ++restoreGenerationRef.current;
+    canvasReadyRef.current = false;
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    const isCurrent = () => generation === restoreGenerationRef.current && ctx.canvas === canvasRef.current;
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      if (!isCurrent()) return;
+      canvasReadyRef.current = true;
+      if (image.width > 16000 || image.height > 16000) {
+        setRequestError("图片尺寸过大，请先缩小后上传。");
+        return;
+      }
+      pushHistory();
+      ctx.fillStyle = activeArtwork?.background ?? PAPER;
+      ctx.fillRect(0, 0, WIDTH, HEIGHT);
+      const scale = Math.min(WIDTH / image.width, HEIGHT / image.height);
+      const width = image.width * scale;
+      const height = image.height * scale;
+      ctx.drawImage(image, (WIDTH - width) / 2, (HEIGHT - height) / 2, width, height);
+      scheduleSave();
+      setRequestError("");
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      if (isCurrent()) {
+        canvasReadyRef.current = true;
+        setRequestError("图片无法读取，请换一张再试。");
+      }
+    };
+    image.src = url;
   }
 
   function downloadArtwork(artwork = activeArtwork) {
@@ -678,11 +761,11 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
   }
 
   function analyzeArtwork() {
-    if (!canvasRef.current || !activeArtwork || (!activeArtwork.image && historyRef.current.length === 0)) {
+    if (!canvasRef.current || !canvasReadyRef.current || !activeArtwork || (!activeArtwork.image && historyRef.current.length === 0)) {
       setRequestError("先在画布上留下些内容，再邀请 Aether 来看。");
       return;
     }
-    const image = canvasRef.current.toDataURL("image/jpeg", 0.88);
+    const image = canvasRef.current.toDataURL("image/png");
     patchArtwork(activeJourney.id, activeArtwork.id, { image });
     updateJourney(activeJourney.id, { phase: "reflection" });
     void askAether(`我完成了《${activeArtwork.title}》。请把它和我们之前聊过的内容放在一起，认真看看，然后告诉我你的真实感受和见解。`, image, "reflection");
@@ -696,7 +779,44 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
 
   function endJourney() {
     if (!activeJourney) return;
+    saveCanvasNow();
+    stopResponse();
     updateJourney(activeJourney.id, { phase: "completed", completedAt: now() });
+  }
+
+  function exportJourney() {
+    if (!activeJourney) return;
+    const image = saveCanvasNow();
+    const snapshot = { ...activeJourney, artworks: activeJourney.artworks.map((artwork) => artwork.id === activeArtwork?.id && image ? { ...artwork, image } : artwork) };
+    const url = URL.createObjectURL(new Blob([JSON.stringify({ format: "aether-journey", version: 1, journey: snapshot }, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = (activeJourney.title || "Aether") + ".json";
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function importJourney(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      if (file.size > 20_000_000) throw new Error("旅程文件过大，请分开导入。");
+      const raw = JSON.parse(await file.text());
+      const item = raw.journey as Journey;
+      if (raw.format !== "aether-journey" || raw.version !== 1 || !item || typeof item.title !== "string" || !Array.isArray(item.messages) || !Array.isArray(item.artworks)) throw new Error("请选择 Aether 导出的旅程文件。");
+      if (item.messages.length > 500 || item.artworks.length > 40 || !item.messages.every((message) => message && ["assistant", "user"].includes(message.role) && typeof message.text === "string") || !item.artworks.every((artwork) => artwork && typeof artwork.id === "string" && typeof artwork.title === "string" && /^#[0-9a-f]{6}$/i.test(artwork.background) && (!artwork.image || /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(artwork.image)))) throw new Error("旅程文件内容不完整或格式不受支持。");
+      saveCanvasNow();
+      stopResponse();
+      const timestamp = now();
+      const journey: Journey = { id: crypto.randomUUID(), title: item.title.slice(0, 200), phase: item.artworks.length ? "reflection" : "dialogue", createdAt: timestamp, updatedAt: timestamp, messages: item.messages.map((message) => ({ id: crypto.randomUUID(), role: message.role, text: message.text.slice(0, 16000) })), artworks: item.artworks.map((artwork) => ({ id: artwork.id, title: artwork.title.slice(0, 200), image: artwork.image, background: artwork.background, createdAt: timestamp, updatedAt: timestamp })), activeArtworkId: item.artworks.some((artwork) => artwork.id === item.activeArtworkId) ? item.activeArtworkId : item.artworks[0]?.id };
+      setJourneys((current) => [journey, ...current]);
+      setActiveJourneyId(journey.id);
+      setScreen("session");
+      setRequestError("");
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : "旅程导入失败。");
+    }
   }
 
   function renameArtwork(value: string) {
@@ -719,7 +839,7 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
             value={input}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
                 event.preventDefault();
                 event.currentTarget.form?.requestSubmit();
               }
@@ -727,7 +847,7 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
             placeholder={modelStatus === "missing" ? "配置 API 后即可开始真实对话" : "写下此刻想到的…"}
             aria-label="与 Aether 对话"
           />
-          <button type="submit" disabled={!input.trim() || thinking} aria-label="发送">↗</button>
+          {thinking ? <button type="button" onClick={stopResponse} aria-label="停止回应">■</button> : <button type="submit" disabled={!input.trim()} aria-label="发送">↗</button>}
         </form>
         <div className="model-line">
           <span className={`status-dot ${modelStatus}`} />
@@ -813,7 +933,10 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
         </div>
         <div className="session-sidebar-foot">
           <button onClick={endJourney} disabled={activeJourney.phase === "completed"}>结束当前对话</button>
-          <small>结束后仍会保留全部对话与作品</small>
+          <button onClick={exportJourney}>导出这段旅程</button>
+          <button onClick={() => restoreFileRef.current?.click()}>导入旅程</button>
+          <input ref={restoreFileRef} type="file" accept=".json,application/json" hidden onChange={importJourney} />
+          <small>体验暂存，刷新前请导出。云端保存接入中。</small>
         </div>
       </aside>
     );
@@ -827,31 +950,17 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
         <img className="home-cover" src="/og.jpg" alt="Aether 灵魂对话，一张漂浮在深色宇宙中的抽象作品" />
         <div className="home-shade" />
         <header className="home-nav">
-          <button className="wordmark" onClick={() => setScreen("home")}>AETHER</button>
+          <button className="wordmark" onClick={() => navigateTo("home")}>AETHER</button>
           <div className="home-nav-actions">
-            {authEnabled ? (
-              <>
-                <Show when="signed-out"><SignInButton mode="redirect"><button className="home-login-link">邮箱登录</button></SignInButton></Show>
-                <Show when="signed-in">
-                  <button className="home-space-link" onClick={() => setScreen("space")}>作品空间 <span>{galleryWorks.length}</span></button>
-                  <UserButton appearance={{ elements: { avatarBox: "aether-avatar" } }} />
-                </Show>
-              </>
-            ) : <span className="auth-unavailable">登录服务尚未连接</span>}
+            <button className="home-space-link" onClick={() => navigateTo("space")}>作品空间 <span>{galleryWorks.length}</span></button>
+            {authEnabled && <><Show when="signed-out"><Link className="home-login-link" href="/sign-in">邮箱登录</Link></Show><Show when="signed-in"><UserButton /></Show></>}
           </div>
         </header>
         <div className="home-entry">
-          {authEnabled ? (
-            <>
-              <Show when="signed-out"><SignInButton mode="redirect"><button>邮箱登录，开始对话 <span>→</span></button></SignInButton></Show>
-              <Show when="signed-in">
-                <button onClick={startNewJourney}>开始一段对话 <span>→</span></button>
-                {journeys.some((journey) => journey.messages.length > 1 || journey.artworks.length) && (
-                  <button className="continue-link" onClick={() => openJourney(journeys[0].id)}>继续上一次</button>
-                )}
-              </Show>
-            </>
-          ) : <button disabled>登录服务连接中</button>}
+          <div className="home-intro"><span>AETHER</span><h1>灵魂对话</h1><p>让语言成为线条，让作品继续说话。</p></div>
+          <button onClick={startNewJourney}>开始一段对话 <span>→</span></button>
+          <small>无需登录，即可开始</small>
+          {journeys.some((journey) => journey.messages.length > 1 || journey.artworks.length) && <button className="continue-link" onClick={() => openJourney([...journeys].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0].id)}>继续最近的旅程</button>}
         </div>
         <footer className="home-footer"><span>作品不会替你定义自己</span><span>© 2026 Aether</span></footer>
       </main>
@@ -861,7 +970,7 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
   if (screen === "space") {
     return (
       <main className="space-screen">
-        <header className="space-nav"><button className="dark-wordmark" onClick={() => setScreen("home")}>AETHER</button><div className="space-nav-actions"><button onClick={startNewJourney}>新的对话 ＋</button>{authEnabled && <UserButton appearance={{ elements: { avatarBox: "aether-avatar light" } }} />}</div></header>
+        <header className="space-nav"><button className="dark-wordmark" onClick={() => navigateTo("home")}>AETHER</button><div className="space-nav-actions"><button onClick={startNewJourney}>新的对话 ＋</button>{authEnabled && <UserButton appearance={{ elements: { avatarBox: "aether-avatar light" } }} />}</div></header>
         <section className="space-heading"><span>ART SPACE</span><h1>作品空间</h1></section>
         <section className="work-grid">
           {galleryWorks.map(({ journey, artwork }) => (
@@ -879,12 +988,12 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
   return (
     <main className={`session-screen phase-${activeJourney.phase}`}>
       <header className="session-header">
-        <button className="dark-wordmark" onClick={() => setScreen("home")}>AETHER</button>
+        <button className="dark-wordmark" onClick={() => navigateTo("home")}>AETHER</button>
         <input value={activeJourney.title} onChange={(event) => updateJourney(activeJourney.id, { title: event.target.value })} aria-label="对话名称" />
         <div className="session-header-actions">
           <button className="session-list-toggle" onClick={() => setSessionSidebarOpen(true)}>会话</button>
           <button onClick={returnToConversation}>对话</button>
-          <button onClick={() => setScreen("space")}>作品 {activeJourney.artworks.length}</button>
+          <button onClick={() => navigateTo("space")}>作品 {activeJourney.artworks.length}</button>
           {authEnabled && <UserButton appearance={{ elements: { avatarBox: "aether-avatar" } }} />}
         </div>
       </header>
@@ -895,6 +1004,7 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
           {renderSessionSidebar()}
           <div className="dialogue-column">
             <div className="dialogue-intro"><span>SOUL DIALOGUE</span><h1>我们先聊一会儿。</h1></div>
+            <div className="manual-create"><button onClick={startBlankArtwork}>开始创作 / 上传作品 <span>↗</span></button><small>想画的时候，随时开始。</small></div>
             {renderMessages()}
             {renderComposer()}
           </div>
@@ -916,6 +1026,7 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
           <section className="canvas-workspace">
             <div className="canvas-topbar">
               <div className="art-name"><input value={activeArtwork?.title ?? ""} onChange={(event) => renameArtwork(event.target.value)} aria-label="作品名称" /><span>{savedState}</span></div>
+              {requestError && <p className="request-error" role="alert">{requestError}</p>}
               <div className="canvas-actions"><button onClick={duplicateArtwork}>创建续作</button><button onClick={() => downloadArtwork()}>下载</button><button className="danger" onClick={() => activeArtwork && deleteArtwork(activeArtwork.id)}>删除</button><button className="finish-art" onClick={analyzeArtwork} disabled={thinking}>完成创作，回到对话</button></div>
             </div>
 
@@ -996,11 +1107,11 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
         <section className="completed-layout">
           {renderSessionSidebar()}
           <div className="completed-room">
-            <div className="completed-copy"><span>JOURNEY SAVED</span><h1>这次相遇已经保存。</h1><p>对话与 {activeJourney.artworks.length} 幅作品仍在你的作品空间里。结束不是删除，你随时可以回来。</p></div>
+            <div className="completed-copy"><span>JOURNEY PAUSED</span><h1>为这次相遇留一处停顿。</h1><p>这段对话与 {activeJourney.artworks.length} 幅作品暂存在本次体验中。刷新或离开前，请导出旅程。</p><button onClick={exportJourney}>导出完整旅程</button></div>
             <div className="completed-works">
               {activeJourney.artworks.filter((artwork) => artwork.image).map((artwork) => <img key={artwork.id} src={artwork.image} alt={artwork.title} />)}
             </div>
-            <div className="completed-actions"><button onClick={startNewJourney}>开启新的对话</button><button onClick={() => setScreen("space")}>回到作品空间</button><button onClick={() => updateJourney(activeJourney.id, { phase: activeJourney.artworks.length ? "reflection" : "dialogue", completedAt: undefined })}>重新打开这段对话</button></div>
+            <div className="completed-actions"><button onClick={startNewJourney}>开启新的对话</button><button onClick={() => navigateTo("space")}>回到作品空间</button><button onClick={() => updateJourney(activeJourney.id, { phase: activeJourney.artworks.length ? "reflection" : "dialogue", completedAt: undefined })}>重新打开这段对话</button></div>
           </div>
         </section>
       )}
