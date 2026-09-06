@@ -96,13 +96,6 @@ export function importJourney(raw: unknown): Journey {
   const messages = value.messages.map(item => { const m = record(item); if (typeof m.id !== 'string' || !m.id || messageIds.has(m.id) || !['user', 'assistant'].includes(String(m.role)) || typeof m.content !== 'string' || m.content.length > 30000) throw new Error('对话数据格式无效。'); messageIds.add(m.id); return { id: m.id, role: m.role as Message['role'], content: m.content, ...(typeof m.artworkId === 'string' && ids.has(m.artworkId) ? { artworkId: m.artworkId } : {}) }; });
   return { version: 2, id: uid(), artworks, messages };
 }
-).test(art.baseImage))) throw new Error('作品图片格式无效。');
-    return { id: art.id, title: typeof art.title === 'string' ? art.title.slice(0, 100) : '未命名的片刻', paper: art.paper, marks: art.marks as Mark[], redo: [], origin: ['human', 'aether', 'dialogue'].includes(String(art.origin)) ? art.origin as Artwork['origin'] : 'human', ...(typeof art.parentId === 'string' ? { parentId: art.parentId } : {}), ...(typeof art.caption === 'string' ? { caption: art.caption.slice(0, 1000) } : {}), ...(typeof art.baseImage === 'string' ? { baseImage: art.baseImage } : {}), createdAt: typeof art.createdAt === 'string' ? art.createdAt : new Date().toISOString() };
-  });
-  const messages = value.messages.map(item => { const m = record(item); if (!['user', 'assistant'].includes(String(m.role)) || typeof m.content !== 'string' || m.content.length > 30000) throw new Error('对话数据格式无效。'); return { id: uid(), role: m.role as Message['role'], content: m.content, ...(typeof m.artworkId === 'string' && ids.has(m.artworkId) ? { artworkId: m.artworkId } : {}) }; });
-  return { version: 2, id: uid(), artworks, messages };
-}
-
 export function nextQuestionStyle(text: string, current: 'natural' | 'fewer' | 'none') {
   if (/不要.{0,5}(提问|问我|再问)|不.{0,3}提问|别.{0,3}问/.test(text)) return 'none';
   if (/少.{0,3}问|减少.{0,3}提问/.test(text)) return 'fewer';
