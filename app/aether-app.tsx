@@ -3,6 +3,7 @@
 
 import { ChangeEvent, FormEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Show, UserButton } from "@clerk/nextjs";
+import Link from "next/link";
 
 type Role = "assistant" | "user";
 type Tool = "pencil" | "brush" | "marker" | "eraser" | "line" | "rectangle" | "ellipse";
@@ -141,6 +142,29 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
   const activeJourney = journeys.find((journey) => journey.id === activeJourneyId) ?? journeys[0];
   const activeArtwork = activeJourney?.artworks.find((artwork) => artwork.id === activeJourney.activeArtworkId);
 
+  function context() {
+    return canvasRef.current?.getContext("2d", { willReadFrequently: true }) ?? null;
+  }
+
+  function restoreCanvas(dataUrl: string, onRestored?: () => void) {
+    const ctx = context();
+    if (!ctx) return;
+    const generation = ++restoreGenerationRef.current;
+    canvasReadyRef.current = false;
+    const image = new Image();
+    image.onload = () => {
+      if (generation !== restoreGenerationRef.current || ctx.canvas !== canvasRef.current) return;
+      ctx.clearRect(0, 0, WIDTH, HEIGHT);
+      ctx.drawImage(image, 0, 0, WIDTH, HEIGHT);
+      canvasReadyRef.current = true;
+      onRestored?.();
+    };
+    image.onerror = () => {
+      if (generation === restoreGenerationRef.current) setRequestError("这幅作品暂时无法读取，请重新导入。");
+    };
+    image.src = dataUrl;
+  }
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const first = makeJourney();
@@ -179,7 +203,7 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
     if (activeArtwork.image) restoreCanvas(activeArtwork.image);
     else canvasReadyRef.current = true;
     return () => {
-      if (restoreGenerationRef.current >= generation) ++restoreGenerationRef.current;
+      if (restoreGenerationRef.current >= generation) restoreGenerationRef.current = restoreGenerationRef.current + 1;
       canvasReadyRef.current = false;
     };
     // Restore only on navigation, never on the snapshot update it triggers.
@@ -523,29 +547,6 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
     if (!activeJourney) return;
     saveCanvasNow();
     updateJourney(activeJourney.id, { activeArtworkId: artworkId });
-  }
-
-  function context() {
-    return canvasRef.current?.getContext("2d", { willReadFrequently: true }) ?? null;
-  }
-
-  function restoreCanvas(dataUrl: string, onRestored?: () => void) {
-    const ctx = context();
-    if (!ctx) return;
-    const generation = ++restoreGenerationRef.current;
-    canvasReadyRef.current = false;
-    const image = new Image();
-    image.onload = () => {
-      if (generation !== restoreGenerationRef.current || ctx.canvas !== canvasRef.current) return;
-      ctx.clearRect(0, 0, WIDTH, HEIGHT);
-      ctx.drawImage(image, 0, 0, WIDTH, HEIGHT);
-      canvasReadyRef.current = true;
-      onRestored?.();
-    };
-    image.onerror = () => {
-      if (generation === restoreGenerationRef.current) setRequestError("这幅作品暂时无法读取，请重新导入。");
-    };
-    image.src = dataUrl;
   }
 
   function point(event: PointerEvent<HTMLCanvasElement>) {
@@ -952,7 +953,7 @@ export default function AetherApp({ authEnabled }: { authEnabled: boolean }) {
           <button className="wordmark" onClick={() => navigateTo("home")}>AETHER</button>
           <div className="home-nav-actions">
             <button className="home-space-link" onClick={() => navigateTo("space")}>作品空间 <span>{galleryWorks.length}</span></button>
-            {authEnabled && <><Show when="signed-out"><a className="home-login-link" href="/sign-in">邮箱登录</a></Show><Show when="signed-in"><UserButton /></Show></>}
+            {authEnabled && <><Show when="signed-out"><Link className="home-login-link" href="/sign-in">邮箱登录</Link></Show><Show when="signed-in"><UserButton /></Show></>}
           </div>
         </header>
         <div className="home-entry">
