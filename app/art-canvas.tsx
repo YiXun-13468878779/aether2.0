@@ -40,7 +40,7 @@ export function DrawingSurface({ art, tool, color, width, opacity, onMark, onUnd
     const y = Math.max(0, Math.min(HEIGHT, (event.clientY - rect.top) / rect.height * HEIGHT));
     const previous = pending.current?.points.at(-1);
     const speed = previous ? Math.hypot(x - previous.x, y - previous.y) : 0;
-    return { x, y, p: event.pointerType === 'pen' ? Math.max(.1, event.pressure) : Math.max(.3, .72 - speed / 180) };
+    return { x, y, p: event.pointerType === 'pen' ? Math.max(.1, event.pressure) : Math.max(.45, .8 - speed / 300) };
   }
   function preview() { const ctx = canvasRef.current?.getContext('2d'); if (!ctx || !baseline.current || !pending.current) return; ctx.clearRect(0, 0, WIDTH, HEIGHT); ctx.drawImage(baseline.current, 0, 0); paintMark(ctx, pending.current); }
   function box(a: Point, b: Point): Region { return { x: Math.min(a.x,b.x), y: Math.min(a.y,b.y), w: Math.max(20,Math.abs(a.x-b.x)), h: Math.max(20,Math.abs(a.y-b.y)) }; }
