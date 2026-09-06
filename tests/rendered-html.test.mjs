@@ -266,3 +266,11 @@ test('invalid region metadata cannot enter the artwork instructions', async () =
 test('the deployed entry points to the new studio and preserves the conversation core', () => {
   const page=readFileSync(new URL('../app/page.tsx',import.meta.url),'utf8'); assert.match(page,/ArtStudio/); assert.match(studioSource,/开始一段对话/); assert.match(studioSource,/框选画面交流/); assert.match(studioSource,/材料实验室/); assert.match(studioSource,/返回主页/); assert.doesNotMatch(studioSource,/让 Aether 回一幅|你一笔|AI 一笔/);
 });
+
+
+test('focused analysis sends both the full artwork and its actual detail crop', async () => {
+  const crop='data:image/png;base64,Yg=='; const h=routeHarness(); const response=await h.api.POST(request({...input,focus:{x:.2,y:.3,w:.4,h:.3,image:crop}})); await response.text(); const main=h.calls.find(call=>call.body.stream); const parts=main.body.messages.flatMap(message=>Array.isArray(message.content)?message.content:[]); const images=parts.filter(part=>part.type==='image_url'); assert.equal(images.length,2); assert.equal(images[0].image_url.url,input.artworks[0].image); assert.equal(images[1].image_url.url,crop); assert.match(parts.filter(part=>part.type==='text').map(part=>part.text).join(' '),/并非另一幅作品/);
+});
+test('detail crops count toward the same request image budget', async () => {
+  const h=routeHarness(); const response=await h.api.POST(request({...input,focus:{x:0,y:0,w:1,h:1,image:'data:image/png;base64,'+'A'.repeat(3200000)}})); assert.equal(response.status,413); assert.equal(h.calls.length,0);
+});
