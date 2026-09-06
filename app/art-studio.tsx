@@ -19,7 +19,7 @@ function StudioSession({ session, initialView, saveState, onUpdate, onManage, on
 
   const [view, setView] = useState<View>(initialView), [journey, setJourney] = useState<Journey>(session.journey), [activeId, setActiveId] = useState(session.activeId);
   const [tool, setTool] = useState<Tool>('pastel'), [color, setColor] = useState(COLORS[1]), [width, setWidth] = useState(42), [opacity, setOpacity] = useState(.86);
-  const [mobilePane, setMobilePane] = useState<'canvas' | 'chat'>('canvas'), [focusCanvas, setFocusCanvas] = useState(false), [selecting, setSelecting] = useState(false), [region, setRegion] = useState<Region>();
+  const [mobilePane, setMobilePane] = useState<'canvas' | 'chat'>(session.phase === 'creating' ? 'canvas' : 'chat'), [focusCanvas, setFocusCanvas] = useState(false), [selecting, setSelecting] = useState(false), [region, setRegion] = useState<Region>();
   const [draft, setDraft] = useState(session.draft), [busy, setBusy] = useState(false), [status, setStatus] = useState(''), [notice, setNotice] = useState(''), [error, setError] = useState('');
   const [settings, setSettings] = useState(false), [questionStyle, setQuestionStyle] = useState<'natural' | 'fewer' | 'none'>(session.questionStyle), [invitation, setInvitation] = useState<Invitation | null>(session.invitation);
   const [exhibition, setExhibition] = useState<Exhibition>(session.exhibition), [exhibitIndex, setExhibitIndex] = useState(0);
