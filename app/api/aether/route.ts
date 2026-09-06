@@ -218,7 +218,7 @@ export async function POST(request: NextRequest) {
       phase?: Phase;
       messages?: IncomingMessage[];
       artworks?: ArtworkInput[];
-      focus?: { x?: number; y?: number; w?: number; h?: number };
+      focus?: { x?: number; y?: number; w?: number; h?: number; image?: string };
       preferences?: { avoidQuestions?: boolean; questionStyle?: "natural" | "fewer" | "none" };
     };
 
@@ -235,7 +235,7 @@ export async function POST(request: NextRequest) {
     const artworks = Array.isArray(body.artworks)
       ? body.artworks.slice(-3).filter((artwork) => artwork && typeof artwork.id === "string" && typeof artwork.title === "string")
       : [];
-    const imageBytes = artworks.reduce((total, artwork) => total + (typeof artwork.image === "string" ? artwork.image.length : 0), 0);
+    const imageBytes = artworks.reduce((total, artwork) => total + (typeof artwork.image === "string" ? artwork.image.length : 0), 0) + (typeof body.focus?.image === "string" ? body.focus.image.length : 0);
     if (imageBytes > 3_200_000) return NextResponse.json({ message: "本轮作品图片过大，请缩小后重试。" }, { status: 413 });
 
     let plan = fallbackPlan;
@@ -285,8 +285,12 @@ export async function POST(request: NextRequest) {
         text: `以下是这个 Session 最近的 ${visualArtworks.length} 幅作品。请把当前作品作为重点，同时结合此前对话和同一旅程中的其他作品来观看。`,
       }];
       for (const artwork of visualArtworks) {
-        content.push({ type: "text", text: `${artwork.isCurrent ? "当前作品" : "此前作品"}：ID ${artwork.id}，《${artwork.title}》` });
+        content.push({ type: "text", text: `${artwork.isCurrent ? "当前作品" : "同一旅程的其他作品"}：ID ${artwork.id}，《${artwork.title}》` });
         content.push({ type: "image_url", image_url: { url: artwork.image } });
+      }
+      if (validFocus && typeof focus?.image === "string" && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(focus.image)) {
+        content.push({ type: "text", text: "这是当前作品中用户实际框选的局部放大图，并非另一幅作品。先准确观看这张局部图，再联系上面整幅作品；不要把框外的笔触描述成框内的内容。" });
+        content.push({ type: "image_url", image_url: { url: focus.image } });
       }
       apiMessages.push({ role: "user", content });
     }
