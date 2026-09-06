@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 
+export const maxDuration = 180;
+const guestBudget = new Map<string, { count: number; until: number }>();
+
 type IncomingMessage = {
   role: "assistant" | "user";
   content: string;
@@ -129,6 +132,8 @@ async function planTurn(input: {
   messages: IncomingMessage[];
   artworkCount: number;
   avoidQuestions: boolean;
+  questionStyle: string;
+  signal: AbortSignal;
 }) {
   const response = await fetch(`${API_BASE_URL}/chat/completions`, {
     method: "POST",
@@ -146,6 +151,7 @@ async function planTurn(input: {
             phase: input.phase,
             artwork_count: input.artworkCount,
             user_prefers_no_questions: input.avoidQuestions,
+            question_style: input.questionStyle,
             dialogue: input.messages.slice(-12),
           }),
         },
@@ -154,7 +160,7 @@ async function planTurn(input: {
       enable_thinking: false,
       max_completion_tokens: 600,
     }),
-    signal: AbortSignal.timeout(25_000),
+    signal: AbortSignal.any([input.signal, AbortSignal.timeout(25_000)]),
   });
 
   const raw = await response.json() as {
@@ -172,14 +178,25 @@ function eventData(payload: unknown) {
 }
 
 export async function GET() {
-  const { userId } = await auth();
-  if (!userId) return NextResponse.json({ message: "请先登录 Aether。" }, { status: 401 });
-  return NextResponse.json({ configured: Boolean(process.env.DASHSCOPE_API_KEY), model: MODEL, streaming: true, thinking: true });
+  return NextResponse.json({ configured: Boolean(process.env.DASHSCOPE_API_KEY), model: MODEL, streaming: true, thinking: true, guest: process.env.AETHER_REQUIRE_LOGIN !== "true" });
 }
 
 export async function POST(request: NextRequest) {
-  const { userId } = await auth();
-  if (!userId) return NextResponse.json({ message: "请先登录 Aether。" }, { status: 401 });
+  const origin = request.headers.get("origin");
+  if (origin && origin !== new URL(request.url).origin) return NextResponse.json({ message: "请从 Aether 页面发起对话。" }, { status: 403 });
+  if (process.env.AETHER_REQUIRE_LOGIN === "true") {
+    const { userId } = await auth();
+    if (!userId) return NextResponse.json({ message: "请先登录 Aether。" }, { status: 401 });
+  } else {
+    // Preview safeguard only. A shared durable quota is required before public launch.
+    const key = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "preview";
+    const now = Date.now();
+    for (const [id, bucket] of guestBudget) if (bucket.until <= now) guestBudget.delete(id);
+    const bucket = guestBudget.get(key) ?? { count: 0, until: now + 10 * 60_000 };
+    if (bucket.count >= 30 || guestBudget.size >= 10000) return NextResponse.json({ message: "这段时间的体验次数已用完，请稍后继续。" }, { status: 429, headers: { "Retry-After": "600" } });
+    bucket.count++;
+    guestBudget.set(key, bucket);
+  }
 
   if (!process.env.DASHSCOPE_API_KEY) {
     return NextResponse.json(
@@ -189,12 +206,17 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = await request.json() as {
+    const rawBody = await request.text();
+    if (new TextEncoder().encode(rawBody).byteLength > 3_800_000) return NextResponse.json({ message: "本轮作品过大，请缩小后重试。" }, { status: 413 });
+    let parsed: unknown;
+    try { parsed = JSON.parse(rawBody); } catch { return NextResponse.json({ message: "对话请求格式不正确。" }, { status: 400 }); }
+    if (!parsed || typeof parsed !== "object") return NextResponse.json({ message: "缺少对话内容。" }, { status: 400 });
+    const body = parsed as {
       mode?: "conversation" | "artwork";
       phase?: Phase;
       messages?: IncomingMessage[];
       artworks?: ArtworkInput[];
-      preferences?: { avoidQuestions?: boolean };
+      preferences?: { avoidQuestions?: boolean; questionStyle?: "natural" | "fewer" | "none" };
     };
 
     const phase: Phase = ["dialogue", "creating", "reflection", "completed"].includes(body.phase ?? "")
@@ -211,7 +233,7 @@ export async function POST(request: NextRequest) {
       ? body.artworks.slice(-3).filter((artwork) => artwork && typeof artwork.id === "string" && typeof artwork.title === "string")
       : [];
     const imageBytes = artworks.reduce((total, artwork) => total + (typeof artwork.image === "string" ? artwork.image.length : 0), 0);
-    if (imageBytes > 18_000_000) return NextResponse.json({ message: "本轮作品图片过大，请缩小后重试。" }, { status: 413 });
+    if (imageBytes > 3_200_000) return NextResponse.json({ message: "本轮作品图片过大，请缩小后重试。" }, { status: 413 });
 
     let plan = fallbackPlan;
     try {
@@ -220,14 +242,18 @@ export async function POST(request: NextRequest) {
         messages,
         artworkCount: artworks.length,
         avoidQuestions: body.preferences?.avoidQuestions === true,
+        questionStyle: body.preferences?.questionStyle ?? "natural",
+        signal: request.signal,
       });
-    } catch (error) {
-      console.warn("Aether controller fallback", error);
+    } catch {
+      return NextResponse.json({ message: "Aether 暂时未能完成本轮判断，请稍后重试。" }, { status: 503 });
     }
 
-    const preferenceInstruction = body.preferences?.avoidQuestions
+    const preferenceInstruction = body.preferences?.questionStyle === "none" || body.preferences?.avoidQuestions
       ? "用户已明确表示不喜欢被提问：这一轮不要提出任何问题，也不要用疑问句结尾。"
-      : "不要把提问当作默认结尾；只有确有必要时才提出一个开放问题。";
+      : body.preferences?.questionStyle === "fewer"
+        ? "用户希望少问：先充分回应，不连续追问；重要且能深化交流的问题仍然可以自然提出。"
+        : "不要把提问当作默认结尾；只有确有必要时才提出一个开放问题。";
     const planningInstruction = plan.response_mode === "safety_clarification"
       ? "这句话可能涉及现实伤害但指代不清。不要把它直接解释成创作隐喻；先关心并澄清它指的是画面、念头还是真实的人。"
       : plan.safety_level === "high"
@@ -245,14 +271,14 @@ export async function POST(request: NextRequest) {
       ...messages.map((message) => ({ role: message.role, content: message.content })),
     ];
 
-    const visualArtworks = artworks.filter((artwork) => typeof artwork.image === "string" && artwork.image.startsWith("data:image/"));
-    if (body.mode === "artwork" && visualArtworks.length) {
+    const visualArtworks = artworks.filter((artwork) => typeof artwork.image === "string" && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(artwork.image));
+    if (visualArtworks.length) {
       const content: Array<Record<string, unknown>> = [{
         type: "text",
         text: `以下是这个 Session 最近的 ${visualArtworks.length} 幅作品。请把当前作品作为重点，同时结合此前对话和同一旅程中的其他作品来观看。`,
       }];
       for (const artwork of visualArtworks) {
-        content.push({ type: "text", text: `${artwork.isCurrent ? "当前作品" : "此前作品"}：《${artwork.title}》` });
+        content.push({ type: "text", text: `${artwork.isCurrent ? "当前作品" : "此前作品"}：ID ${artwork.id}，《${artwork.title}》` });
         content.push({ type: "image_url", image_url: { url: artwork.image } });
       }
       apiMessages.push({ role: "user", content });
@@ -272,7 +298,7 @@ export async function POST(request: NextRequest) {
         thinking_budget: body.mode === "artwork" ? 5000 : 3000,
         max_completion_tokens: body.mode === "artwork" ? 8000 : 5000,
       }),
-      signal: AbortSignal.timeout(150_000),
+      signal: AbortSignal.any([request.signal, AbortSignal.timeout(150_000)]),
     });
 
     if (!apiResponse.ok) {
@@ -317,7 +343,7 @@ export async function POST(request: NextRequest) {
             if (done) break;
           }
 
-          if (!answerStarted) controller.enqueue(encoder.encode(eventData({ type: "delta", text: "我还在看，也愿意陪你把这里继续说清楚。" })));
+          if (!answerStarted) throw new Error("EMPTY_MODEL_RESPONSE");
           controller.enqueue(encoder.encode(eventData({
             type: "control",
             inviteToCreate: plan.invite_to_create,
@@ -327,7 +353,7 @@ export async function POST(request: NextRequest) {
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
           controller.close();
         } catch (error) {
-          console.error("Aether stream failed", error);
+          console.error("Aether stream failed", error instanceof Error ? error.name : "unknown");
           controller.enqueue(encoder.encode(eventData({ type: "error", message: "Aether 的回应中断了，请再试一次。" })));
           controller.close();
         }
@@ -345,7 +371,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("Aether model request failed", error);
+    console.error("Aether model request failed", error instanceof Error ? error.name : "unknown");
     return NextResponse.json({ message: "Aether 暂时没有回应。请稍后重试，或检查模型配置。" }, { status: 502 });
   }
 }
