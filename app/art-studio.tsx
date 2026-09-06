@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { ArtPreview, DrawingSurface, Icon, type Region } from './art-canvas';
-import { WIDTH, HEIGHT, PAPERS, TOOLS, appendMark, artworkImage, hasMarks, importJourney, newArtwork, nextQuestionStyle, redo, uid, undo, type Artwork, type Journey, type Mark, type Tool } from './art-engine';
+import { WIDTH, HEIGHT, PAPERS, TOOLS, appendMark, artworkImage, artworkRegionImage, hasMarks, importJourney, newArtwork, nextQuestionStyle, redo, uid, undo, type Artwork, type Journey, type Mark, type Tool } from './art-engine';
 import './art-studio.css';
 type View = 'home' | 'studio' | 'gallery' | 'exhibition';
 type Exhibition = { title: string; note: string; works: string[]; quotes: string[] };
@@ -68,8 +68,9 @@ export default function ArtStudio() {
     try {
       const contextWorks = [...works.filter(item => item.id !== sourceArt?.id).slice(-1), ...(sourceArt && hasMarks(sourceArt) ? [sourceArt] : [])];
       const images = await Promise.all(contextWorks.map(async item => ({ id: item.id, title: item.title, image: await artworkImage(item, 800), isCurrent: item.id === sourceArt?.id })));
+      const focusedImage = sourceRegion && sourceArt ? await artworkRegionImage(sourceArt, sourceRegion) : undefined;
       if (requestRef.current !== controller) return;
-      const response = await fetch('/api/aether', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: artworkMode || sourceRegion ? 'artwork' : 'conversation', phase: images.length ? 'reflection' : 'dialogue', messages: history.map(({ role, content }) => ({ role, content })), artworks: images, preferences: { questionStyle: nextStyle }, ...(sourceRegion ? { focus: { x: sourceRegion.x / WIDTH, y: sourceRegion.y / HEIGHT, w: sourceRegion.w / WIDTH, h: sourceRegion.h / HEIGHT } } : {}) }), signal: controller.signal });
+      const response = await fetch('/api/aether', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: artworkMode || sourceRegion ? 'artwork' : 'conversation', phase: images.length ? 'reflection' : 'dialogue', messages: history.map(({ role, content }) => ({ role, content })), artworks: images, preferences: { questionStyle: nextStyle }, ...(sourceRegion ? { focus: { image: focusedImage, x: sourceRegion.x / WIDTH, y: sourceRegion.y / HEIGHT, w: sourceRegion.w / WIDTH, h: sourceRegion.h / HEIGHT } } : {}) }), signal: controller.signal });
       if (!response.ok) { const result = await response.json().catch(() => ({})); throw new Error(result.message || 'Aether 暂时没有回应，请稍后重试。'); }
       if (!response.body) throw new Error('回应没有连接成功。');
       reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = '', answer = '', completed = false;
