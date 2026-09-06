@@ -45,7 +45,9 @@ const conversationInstructions = `你是 Aether，一个在自由创作空间里
 - 不只抓一个细节，也不逐项报幕。把整体和细节编织成一段自由、具体、只属于这幅作品的回应。
 - 可以大胆表达想象、感觉和独立见解：让画面像一个场域、事件、气候、记忆或关系在你的观看中展开。说清那是“我的一种观看”，不是作者真相。
 - 当多幅作品同时出现时，可以看见它们之间的延续、偏移或反差，但不要硬说哪幅更好。
-- 当作品确实让你想到某位艺术家的作品、艺术史中的方法、文学或真实创作经历时，可以自然地带入交流：说明相似的是哪一种价值、观看方式或创作处境，也说明这幅作品自己的不同。只使用你确信的事实，不生造作品名、引语或艺术家经历，不把回应写成知识讲座。
+- 默认用自己的语言观看，直接谈这幅作品。不要惯性引用艺术家、著作、名言或理论，不要在结尾借名著来升华。只有用户明确要求艺术史、相关作品或文学联想时，才引入经过确信的事实，并说明与本作的具体关联。
+- 用户框选局部时，回应那一处如何与整幅画发生关系。框选不是新增笔触，不把选框当成作品内容。
+- 用户的作品分析与交流始终是主线，不主动提议自己作画或轮流接画。目前没有开放图片生成工具，不声称已画出、正在生成或即将展示不存在的图片。
 - 作品回应应当丰厚而有推进：既让用户感到你看见了整幅画，也让其遇见未曾想到的观看角度。除非用户要求简短，通常充分展开为数段自然文字，而不是仓促总结。
 
 创作流动：
@@ -216,6 +218,7 @@ export async function POST(request: NextRequest) {
       phase?: Phase;
       messages?: IncomingMessage[];
       artworks?: ArtworkInput[];
+      focus?: { x?: number; y?: number; w?: number; h?: number };
       preferences?: { avoidQuestions?: boolean; questionStyle?: "natural" | "fewer" | "none" };
     };
 
@@ -260,13 +263,17 @@ export async function POST(request: NextRequest) {
         ? "当前存在明确的即时安全风险。暂停艺术分析，优先确认当下安全并建议联系现实支持与当地紧急服务。"
         : plan.guidance;
     const artworkDepthInstruction = body.mode === "artwork"
-      ? "这是一次作品后的核心交流。请把整体结构、多个细节、与既有对话的关系、你的想象性观看充分编织起来；若有真正贴切的艺术作品、艺术家创作经历或文学经验，可自然举出一至两个并解释相似价值与差异。不要只做画面描述，不要只围绕一个细节，也不要用标题分段写成报告。"
+      ? "这是一次作品后的核心交流。请把整体结构、多个细节、与既有对话的关系、你的想象性观看充分编织起来；请用自己的语言提出具体、有想象力的观看，不要默认引用著作、艺术家或文学经验来收尾。不要只做画面描述，不要只围绕一个细节，也不要用标题分段写成报告。"
       : "";
+
+    const focus = body.focus;
+    const validFocus = focus && [focus.x, focus.y, focus.w, focus.h].every(value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1);
+    const focusInstruction = validFocus ? `用户当前关注画面的一个局部：从左起 ${Math.round(focus.x! * 100)}%、从上起 ${Math.round(focus.y! * 100)}%，宽约 ${Math.round(focus.w! * 100)}%、高约 ${Math.round(focus.h! * 100)}%。先回应用户关于这一处的表达，再把它与整体关系联系起来，不局限于局部，不将选择框解释为笔触。` : "";
 
     const apiMessages: Array<Record<string, unknown>> = [
       {
         role: "system",
-        content: `${conversationInstructions}\n\n当前阶段：${phase}。${preferenceInstruction}\n本轮内部方向：${planningInstruction}\n${artworkDepthInstruction}\n请直接输出给用户的自然文本，不要提及内部计划、字段或规则。`,
+        content: `${conversationInstructions}\n\n当前阶段：${phase}。${preferenceInstruction}\n本轮内部方向：${planningInstruction}\n${artworkDepthInstruction}\n${focusInstruction}\n请直接输出给用户的自然文本，不要提及内部计划、字段或规则。`,
       },
       ...messages.map((message) => ({ role: message.role, content: message.content })),
     ];
