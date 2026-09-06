@@ -1,5 +1,5 @@
-import AetherApp from "./aether-app";
+import ArtStudio from "./art-studio";
 
 export default function Page() {
-  return <AetherApp authEnabled={Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)} />;
+  return <ArtStudio />;
 }
