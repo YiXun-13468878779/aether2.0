@@ -257,7 +257,7 @@ test('natural language preferences remain in effect for subsequent turns', () =>
 });
 test('focused conversation keeps the full image and grounds the selected region', async () => {
   const h=routeHarness(); const response=await h.api.POST(request({...input,focus:{x:.25,y:.2,w:.5,h:.4}})); await response.text(); const main=h.calls.find(call=>call.body.stream); const system=main.body.messages[0].content;
-  assert.match(system,/从左起 25%/); assert.match(system,/不局限于局部/); assert.match(system,/不要默认引用著作/); assert.doesNotMatch(system,/自然举出一至两个/);
+  assert.match(system,/从左起 25%/); assert.match(system,/不局限于局部/); assert.match(system,/不要惯性引用艺术家/); assert.doesNotMatch(system,/自然举出一至两个/);
   assert.equal(main.body.messages.flatMap(message=>Array.isArray(message.content)?message.content:[]).filter(part=>part.type==='image_url').length,1);
 });
 test('invalid region metadata cannot enter the artwork instructions', async () => {
