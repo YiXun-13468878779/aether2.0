@@ -232,19 +232,31 @@ test('clear is reversible, and paper color never recolors the underlying marks',
 });
 test('copying immediately after a queued brush stroke preserves it in both works', () => {
   const queue = []; const original = drawing(); let state = {version:2,id:'journey',artworks:[original],messages:[]};
-  const context = {art:original,uid:engine.uid,newArtwork:engine.newArtwork,appendMark:engine.appendMark,setJourney:update=>queue.push(update),setActiveId(){},setRegion(){},setSelecting(){},setView(){},setMobilePane(){},setInvitation(){}};
+  const context = {art:original,uid:engine.uid,newArtwork:engine.newArtwork,appendMark:engine.appendMark,setJourney:update=>queue.push(update),setActiveId(){},setRegion(){},setSelecting(){},setView(){},setMobilePane(){},setPhase(){},setInvitation(){}};
   vm.runInNewContext(compile(actualFunctions(studioSource,['patchArtwork','keepMark','addArtwork'])),context);
   context.keepMark({...aMark,id:'last-stroke'}); context.addArtwork(original); for (const update of queue) state = update(state);
   assert.equal(state.artworks.length,2); assert.equal(state.artworks[0].marks.at(-1).id,'last-stroke'); assert.equal(state.artworks[1].marks.at(-1).id,'last-stroke'); assert.notEqual(state.artworks[0].id,state.artworks[1].id);
 });
-test('journey import round-trips art, dialogue and exhibition links without ID collisions', async () => {
-  const art = drawing(); const raw = {version:2,id:'old',artworks:[art],messages:[{id:'quote-a',role:'assistant',content:'几何作品测试回应',artworkId:art.id}],exhibition:{title:'测试展览',note:'合成几何数据',works:[art.id],quotes:['quote-a']}};
-  const roundTrip = engine.importJourney(raw); assert.equal(roundTrip.messages[0].id,'quote-a'); assert.equal(roundTrip.messages[0].artworkId,art.id);
-  let state={version:2,id:'current',artworks:[art],messages:[]}; let exhibit={title:'',note:'',works:[],quotes:[]};
-  const context = {importJourney:engine.importJourney,uid:engine.uid,stop(){},setJourney:update=>{state=update(state);},setExhibition:update=>{exhibit=update(exhibit);},setActiveId(){},setRegion(){},setSelecting(){},setSettings(){},setView(){},setNotice(){},setError:message=>{throw new Error(message);},errorText:error=>String(error)};
-  vm.runInNewContext(compile(actualFunctions(studioSource,['readJourney'])),context);
-  await context.readJourney({target:{files:[{size:1000,text:async()=>JSON.stringify(raw)}],value:'file'}});
-  assert.equal(state.artworks.length,2); assert.notEqual(state.artworks[0].id,state.artworks[1].id); assert.equal(state.messages[0].artworkId,state.artworks[1].id); assert.equal(exhibit.works[0],state.artworks[1].id); assert.equal(exhibit.quotes[0],state.messages[0].id);
+const sessionsModel={};
+vm.runInNewContext(compile(readFileSync(new URL('../app/art-session-model.ts',import.meta.url),'utf8')),{exports:sessionsModel,crypto,require:name=>{assert.equal(name,'./art-engine');return engine;}});
+test('sessions remain isolated when updating one conversation',()=>{
+ const first=sessionsModel.createSession(),second=sessionsModel.createSession();const changed=sessionsModel.updateSession([first,second],{...first,phase:'creating',draft:'几何测试',journey:{...first.journey,artworks:[drawing()]}});
+ assert.equal(changed[0].phase,'creating');assert.equal(changed[1].journey.artworks.length,0);assert.equal(changed[1].journey.messages.length,0);assert.equal(changed[1].draft,'');assert.equal(first.journey.artworks.length,0);
+});
+test('session and full-library imports preserve dialogue, artwork and exhibition links independently',()=>{
+ const art=drawing(),base=sessionsModel.createSession();const raw={...base,phase:'reflection',activeId:art.id,draft:'继续谈画',brief:'几何构图测试',questionStyle:'fewer',journey:{version:2,id:base.id,artworks:[art],messages:[{id:'quote-a',role:'assistant',content:'几何作品测试回应',artworkId:art.id}]},exhibition:{title:'测试展览',note:'几何数据',works:[art.id],quotes:['quote-a']}};
+ const left=sessionsModel.importSessions({format:'aether-session',version:3,session:raw})[0],right=sessionsModel.importSessions(sessionsModel.sessionBundle([raw]))[0];
+ assert.notEqual(left.id,right.id);assert.notEqual(left.journey.artworks[0].id,right.journey.artworks[0].id);assert.equal(left.journey.messages[0].artworkId,left.activeId);assert.equal(left.exhibition.works[0],left.activeId);assert.equal(left.exhibition.quotes[0],left.journey.messages[0].id);assert.equal(left.phase,'reflection');assert.equal(left.questionStyle,'fewer');assert.equal(left.draft,'继续谈画');
+ const restored=sessionsModel.restoreSession(JSON.parse(JSON.stringify(raw)));assert.equal(restored.id,raw.id);assert.equal(restored.activeId,art.id);assert.equal(restored.brief,raw.brief);
+});
+test('both earlier journey formats migrate into independent sessions',()=>{
+ const art=drawing();const v2=sessionsModel.importSessions({version:2,id:'v2',artworks:[art],messages:[{id:'u',role:'user',content:'几何构图测试'}]})[0];assert.equal(v2.journey.artworks.length,1);
+ const old={format:'aether-journey',version:1,journey:{title:'旧版测试旅程',phase:'reflection',activeArtworkId:'old-art',artworks:[{id:'old-art',title:'蓝色测试图',background:'#f6f1e7',image:'data:image/png;base64,YQ=='}],messages:[{id:'old-m',role:'user',text:'几何构图测试'}]}};const result=sessionsModel.importSessions(old)[0];assert.equal(result.title,'旧版测试旅程');assert.equal(result.phase,'reflection');assert.equal(result.activeId,result.journey.artworks[0].id);assert.equal(result.journey.artworks[0].baseImage,'data:image/png;base64,YQ==');assert.equal(result.journey.messages[0].content,'几何构图测试');
+ assert.throws(()=>sessionsModel.importSessions({...old,journey:{...old.journey,artworks:[{...old.journey.artworks[0],image:'https://invalid.test/tracker'}]}}));
+});
+test('conversation entry waits for the user to enter creation and keeps the conversational seed',()=>{
+ const calls=[],context={journey:{artworks:[],messages:[{role:'user',content:'几何构图测试'}]},phase:'dialogue',art:undefined,brief:'',invitation:null,setBrief:text=>calls.push(['brief',text]),addArtwork:()=>calls.push(['art']),setPhase:phase=>calls.push(['phase',phase]),setView:view=>calls.push(['view',view]),setMobilePane:pane=>calls.push(['pane',pane]),setFocusCanvas(){},setInvitation(){}};
+ vm.runInNewContext(compile(actualFunctions(studioSource,['enter','goCreate'])),context);context.enter(false);assert.equal(calls.some(c=>c[0]==='art'),false);context.goCreate();assert.equal(calls.filter(c=>c[0]==='art').length,1);assert.ok(calls.some(c=>c[0]==='brief'&&c[1]==='几何构图测试'));assert.ok(calls.some(c=>c[0]==='phase'&&c[1]==='creating'));
 });
 test('untrusted imported brush coordinates and external image URLs are rejected', () => {
   const valid={version:2,artworks:[drawing()],messages:[]};
