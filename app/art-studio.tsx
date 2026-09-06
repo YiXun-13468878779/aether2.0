@@ -1,127 +1,14 @@
-Skip to content
-YiXun-13468878779
-aether2.0
-Repository navigation
-Code
-Issues
-Pull requests
-1
- (1)
-Agents
-Actions
-Projects
-Wiki
-aether2.0/app
-/
-
-in
-refactor/art-dialogue
-
-Edit
-
-Preview
-Indent mode
-
-Indent size
-
-Line wrap mode
-
-Editing art-studio.tsx file contents
- 12
- 13
- 14
- 15
- 16
- 17
- 18
- 19
- 20
- 21
- 22
- 23
- 24
- 25
- 26
- 27
- 28
- 29
- 30
- 31
- 32
- 33
- 34
- 35
- 36
- 37
- 38
- 39
- 40
- 41
- 42
- 43
- 44
- 45
- 46
- 47
- 48
- 49
- 50
- 51
- 52
- 53
- 54
- 55
- 56
- 57
- 58
- 59
- 60
- 61
- 62
- 63
- 64
- 65
- 66
- 67
- 68
- 69
- 70
- 71
- 72
- 73
- 74
- 75
- 76
- 77
- 78
- 79
- 80
- 81
- 82
- 83
- 84
- 85
- 86
- 87
- 88
- 89
- 90
- 91
- 92
- 93
- 94
- 95
- 96
- 97
- 98
- 99
-100
-101
-102
-103
-104
-105
 'use client';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { ArtPreview, DrawingSurface, Icon, type Region } from './art-canvas';
+import { WIDTH, HEIGHT, PAPERS, TOOLS, appendMark, artworkImage, hasMarks, importJourney, newArtwork, nextQuestionStyle, redo, uid, undo, type Artwork, type Journey, type Mark, type Tool } from './art-engine';
+import './art-studio.css';
+type View = 'home' | 'studio' | 'gallery' | 'exhibition';
+type Exhibition = { title: string; note: string; works: string[]; quotes: string[] };
+type Invitation = { title: string; prompt: string; action: 'new_artwork' | 'continue_artwork' };
+const COLORS = ['#27232c', '#273bbe', '#e96248', '#dab33e', '#5e7160', '#a393bd', '#f3ede0', '#713d4d'];
+const material: Record<Tool, { name: string; width: number; opacity: number; note: string }> = { ink: { name: '墨迹', width: 14, opacity: 1, note: '流动而有力度，慢下来时更饱满。' }, pastel: { name: '色粉', width: 42, opacity: .86, note: '让颗粒留在纸上，反复叠加会更浓。' }, charcoal: { name: '炭笔', width: 32, opacity: .8, note: '松散的炭粒，保留犹疑和断裂。' }, wash: { name: '色洗', width: 96, opacity: .68, note: '透明的宽色带，适合叠出空气和层次。' }, thread: { name: '游丝', width: 14, opacity: .9, note: '几根纤细的线，一起游走。' }, eraser: { name: '擦除', width: 64, opacity: 1, note: '擦去笔触，让纸重新露出来。' } };
+const emptyJourney: Journey = { version: 2, id: '', artworks: [], messages: [] };
 const emptyExhibition: Exhibition = { title: '一些还没有名字的时刻', note: '在这里，留下我愿意再次观看的片刻。', works: [], quotes: [] };
 function download(content: string, name: string, type = 'application/json') { const link = document.createElement('a'); const url = content.startsWith('data:') ? content : URL.createObjectURL(new Blob([content], { type })); link.href = url; link.download = name; link.click(); if (!content.startsWith('data:')) setTimeout(() => URL.revokeObjectURL(url), 1000); }
 function errorText(error: unknown) { return error instanceof Error ? error.message : '这一步没有完成，请再试一次。'; }
@@ -240,4 +127,12 @@ export default function ArtStudio() {
           {!journey.messages.length ? <div className="art-conversation-welcome"><span className="art-handwritten">Take your time.</span><h2>这里可以<br />慢一点。</h2><p>一句说不清的话、一种颜色，或者今天偶然注意到的东西，都可以成为开始。</p><p>你可以先聊，也可以直接在纸上画。作品会一直在我们身旁。</p></div> : null}
           {journey.messages.map(message => <article className={'art-message art-message-' + message.role} key={message.id}><div className="art-message-label"><span>{message.role === 'user' ? '你' : 'Aether'}</span>{message.artworkId ? <button onClick={() => selectArtwork(message.artworkId!)}>看这幅作品 ↗</button> : null}</div><p>{message.content || status || '正在观看…'}</p>{message.content ? <button className={'art-keep-quote ' + (exhibition.quotes.includes(message.id) ? 'is-kept' : '')} aria-pressed={exhibition.quotes.includes(message.id)} onClick={() => setExhibition(current => ({ ...current, quotes:toggle(current.quotes,message.id) }))}>{exhibition.quotes.includes(message.id) ? '已留在展览中' : '把这句话留在展览中'}</button> : null}</article>)}
           {invitation ? <div className="art-invitation"><span>一个可以试试的方向</span><h3>{invitation.title}</h3><p>{invitation.prompt}</p><div><button onClick={() => { if (invitation.action === 'new_artwork') addArtwork(); else { setMobilePane('canvas'); setInvitation(null); } }}>去画画 <Icon name="arrow" size={16} /></button><button onClick={() => setInvitation(null)}>先继续聊</button></div></div> : null}<div ref={bottomRef} />
-Use Control + Shift + m to toggle the tab key moving focus. Alternatively, use esc then tab to move to the next interactive element on the page.
+        </div><form className="art-composer" onSubmit={event => { event.preventDefault(); void sendMessage(draft); }}>{region ? <div className="art-focus-chip"><Icon name="chat" size={14} /><span>带着整幅画，聊聊框选的这一处</span><button type="button" onClick={() => setRegion(undefined)} aria-label="取消画面框选"><Icon name="close" size={14} /></button></div> : null}<textarea ref={composerRef} aria-label="想对 Aether 说的话" placeholder={region ? '这一处，让你想说些什么？' : '让想到的，自然发生…'} value={draft} maxLength={8000} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); void sendMessage(draft); } }} rows={3} /><div><span>{busy ? '正在回应，可以随时停止' : '⌘ / Ctrl + Enter 发送'}</span>{busy ? <button type="button" className="art-send" onClick={stop} aria-label="停止回应">停止</button> : <button className="art-send" type="submit" disabled={!draft.trim()} aria-label="发送给 Aether"><Icon name="arrow" /></button>}</div></form></aside>
+      </section> : null}
+      {view === 'gallery' ? <section className="art-gallery"><header className="art-gallery-header"><button onClick={() => setView('home')}><Icon name="back" />返回主页</button><div><button onClick={() => importRef.current?.click()}><Icon name="upload" />导入旅程</button><button onClick={exportJourney} disabled={!journey.artworks.length && !journey.messages.length}><Icon name="download" />导出旅程</button></div></header><div className="art-gallery-intro"><div><span className="art-eyebrow">YOUR OPEN COLLECTION</span><h1>作品空间<span> / {String(works.length).padStart(2,'0')}</span></h1><p>一些痕迹，一些还愿意再看一眼的时刻。</p></div><button className="art-dark-button" onClick={() => addArtwork()}><Icon name="plus" />新的一张</button></div><div className="art-collection-note">当前旅程暂存于此页面。离开前导出，换电脑后可导入继续创作。</div><div className="art-gallery-grid">{works.map((item,index) => <article className="art-gallery-card" key={item.id}><button className="art-gallery-image" onClick={() => selectArtwork(item.id)} aria-label={'打开 ' + item.title}><ArtPreview art={item} /><span>继续观看 ↗</span></button><div className="art-gallery-caption"><div><small>{String(index+1).padStart(2,'0')} / {item.origin === 'aether' ? 'AETHER' : 'YOUR HAND'}</small><h2>{item.title || '未命名的片刻'}</h2></div><label><input type="checkbox" checked={exhibition.works.includes(item.id)} onChange={() => setExhibition(current => ({ ...current, works:toggle(current.works,item.id) }))} />入展</label></div></article>)}<button className="art-gallery-empty" onClick={() => addArtwork()}><Icon name="plus" size={32} /><span>{works.length ? '留一点空白，给下一幅。' : '从第一笔开始。'}</span><small>打开材料实验室</small></button></div><section className="art-exhibition-editor"><div><span className="art-eyebrow">MAKE ROOM FOR YOUR WORK</span><h2>为这些片刻，<br />留一间展厅。</h2><p>勾选作品，把对话中想留下的话收入展览。<br />标题和介绍由你决定。</p></div><div><label>展览标题<input value={exhibition.title} maxLength={100} onChange={event => setExhibition(current => ({ ...current,title:event.target.value }))} /></label><label>写在展览前<textarea value={exhibition.note} maxLength={600} rows={3} onChange={event => setExhibition(current => ({ ...current,note:event.target.value }))} /></label><p className="art-selection-count">已选 {exhibition.works.length} 幅作品 · {exhibition.quotes.length} 段对话</p>{savedQuotes.map(message => <div className="art-selected-quote" key={message.id}><p>{message.content}</p><button onClick={() => setExhibition(current => ({ ...current,quotes:current.quotes.filter(id => id !== message.id) }))} aria-label="从展览移除这段话"><Icon name="close" size={14} /></button></div>)}<button className="art-dark-button" disabled={!exhibitWorks.length} onClick={() => { setExhibitIndex(0); setView('exhibition'); }}>进入我的展览 <Icon name="arrow" /></button></div></section></section> : null}
+      {view === 'exhibition' ? <section className="art-exhibition"><header><button onClick={() => setView('gallery')}><Icon name="back" />回到作品空间</button><span>AETHER / A PERSONAL EXHIBITION</span><button onClick={() => window.print()}><Icon name="download" />保存为 PDF</button></header><div className="art-exhibition-title"><span className="art-eyebrow">A FEW MOMENTS, HELD HERE</span><h1>{exhibition.title || '一些还没有名字的时刻'}</h1><p>{exhibition.note}</p></div>{exhibitArt ? <div className="art-exhibition-piece"><div className="art-exhibition-mount"><ArtPreview art={exhibitArt} /></div><div className="art-exhibition-label"><div><small>{String(exhibitIndex+1).padStart(2,'0')} / {String(exhibitWorks.length).padStart(2,'0')}</small><h2>{exhibitArt.title}</h2></div><nav aria-label="展览翻页"><button disabled={exhibitIndex === 0} onClick={() => setExhibitIndex(index => Math.max(0,index-1))} aria-label="上一幅"><Icon name="back" /></button><button disabled={exhibitIndex >= exhibitWorks.length-1} onClick={() => setExhibitIndex(index => Math.min(exhibitWorks.length-1,index+1))} aria-label="下一幅"><Icon name="arrow" /></button></nav></div>{savedQuotes.filter(message => !message.artworkId || message.artworkId === exhibitArt.id).map(message => <blockquote key={message.id}>{message.content}<cite>{message.role === 'user' ? '我留下的话' : '与 Aether 的对话'}</cite></blockquote>)}</div> : null}<div className="art-print-exhibition">{exhibitWorks.filter(item => item.id !== exhibitArt?.id).map(item => <section key={item.id}><ArtPreview art={item} /><h2>{item.title}</h2>{savedQuotes.filter(message => message.artworkId === item.id).map(message => <blockquote key={message.id}>{message.content}<cite>{message.role === 'user' ? '我留下的话' : '与 Aether 的对话'}</cite></blockquote>)}</section>)}</div><footer>每一道痕迹，都曾发生。<span>Aether — 灵魂对话</span></footer></section> : null}
+    </>}
+    {settings ? <div className="art-settings-backdrop"><section ref={dialogRef} className="art-settings" role="dialog" aria-modal="true" aria-labelledby="art-settings-title"><header><h2 id="art-settings-title">按你的节奏。</h2><button onClick={() => setSettings(false)} aria-label="关闭偏好设置"><Icon name="close" /></button></header><p>创作、停留或交谈，都由你决定。</p><label>交流中的提问<select value={questionStyle} onChange={event => setQuestionStyle(event.target.value as typeof questionStyle)}><option value="natural">自然交流，只在有必要时问</option><option value="fewer">少问一些，多谈观看和感受</option><option value="none">不提问，让我自己接着说</option></select></label><div className="art-settings-about"><h3>保留你的旅程</h3><p>这个预览版无需登录。作品和对话暂存于当前页面，刷新或关闭前请导出；文件可在另一台电脑导入继续。</p><div><button onClick={exportJourney} disabled={!journey.artworks.length && !journey.messages.length}><Icon name="download" />导出旅程</button><button onClick={() => importRef.current?.click()}><Icon name="upload" />导入旅程</button></div></div><p className="art-settings-footnote">Aether 是自由创作与作品交流的空间。AI 的观看是一种视角，作品的意义由你保留。</p></section></div> : null}
+    {notice || error ? <div className={'art-toast ' + (error ? 'art-toast-error' : '')} role={error ? 'alert' : 'status'}><span>{error || notice}</span><button aria-label="关闭提示" onClick={() => { setError(''); setNotice(''); }}><Icon name="close" size={16} /></button></div> : null}
+  </main>;
+}
