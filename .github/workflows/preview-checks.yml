@@ -1,7 +1,7 @@
-name: Creative journey preview checks
+name: Art studio preview checks
 on:
   push:
-    branches: ["refactor/creative-journey"]
+    branches: ["refactor/**"]
   pull_request:
     branches: ["main"]
   workflow_dispatch:
@@ -25,4 +25,4 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
-# This workflow only verifies the preview branch. It never deploys or promotes production.
+# Verification only; never deploys or promotes production.
