@@ -56,9 +56,9 @@ export function paintMark(ctx: CanvasRenderingContext2D, mark: Mark) {
       const a = points[i - 1], b = points[i], distance = Math.hypot(b.x - a.x, b.y - a.y);
       const steps = Math.max(1, Math.ceil(distance / Math.max(1.8, mark.width / 8)));
       for (let step = 0; step <= steps; step++) {
-        const t = step / steps, x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t, radius = Math.max(.6, mark.width * (.25 + (a.p + (b.p - a.p) * t) * .65) / 2);
+        const t = step / steps, x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t, radius = Math.max(.6, mark.width * (.4 + (a.p + (b.p - a.p) * t) * .8) / 2);
         if (mark.tool === 'charcoal' || mark.tool === 'pastel') {
-          const count = mark.tool === 'charcoal' ? 14 : 11;
+          const count = mark.tool === 'charcoal' ? 14 : 21;
           ctx.globalAlpha = mark.opacity * (mark.tool === 'charcoal' ? .35 : .64);
           for (let grain = 0; grain < count; grain++) { const angle = random() * Math.PI * 2, r = Math.sqrt(random()) * radius; ctx.beginPath(); ctx.ellipse(x + Math.cos(angle) * r, y + Math.sin(angle) * r, Math.max(.5, radius * (.05 + random() * .21)), Math.max(.4, radius * (.03 + random() * .12)), random() * 3, 0, Math.PI * 2); ctx.fill(); }
         } else { ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill(); }
@@ -101,4 +101,13 @@ export function nextQuestionStyle(text: string, current: 'natural' | 'fewer' | '
   if (/少.{0,3}问|减少.{0,3}提问/.test(text)) return 'fewer';
   if (/可以.{0,4}问|继续.{0,3}问|允许.{0,3}提问/.test(text)) return 'natural';
   return current;
+}
+
+export async function artworkRegionImage(art: Artwork, region: { x: number; y: number; w: number; h: number }): Promise<string> {
+  const canvas = document.createElement('canvas'); await paintArtwork(canvas, art);
+  const x = clamp(region.x, 0, WIDTH - 1), y = clamp(region.y, 0, HEIGHT - 1), w = clamp(region.w, 1, WIDTH - x), h = clamp(region.h, 1, HEIGHT - y);
+  const crop = document.createElement('canvas'), scale = Math.min(2, 640 / Math.max(w, h));
+  crop.width = Math.max(1, Math.round(w * scale)); crop.height = Math.max(1, Math.round(h * scale));
+  crop.getContext('2d')?.drawImage(canvas, x, y, w, h, 0, 0, crop.width, crop.height);
+  return crop.toDataURL('image/png');
 }
