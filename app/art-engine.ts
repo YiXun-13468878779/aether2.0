@@ -86,13 +86,14 @@ export function importJourney(raw: unknown): Journey {
     ids.add(art.id);
     for (const rawMark of art.marks) {
       const m = record(rawMark);
-      if (!(TOOLS as readonly string[]).concat('clear').includes(String(m.tool)) || !hex(m.color) || typeof m.width !== 'number' || !Number.isFinite(m.width) || m.width < 0 || m.width > 160 || typeof m.opacity !== 'number' || m.opacity < 0 || m.opacity > 1 || !Number.isFinite(m.opacity) || !Array.isArray(m.points) || m.points.length > 6000 || (m.fill !== undefined && !hex(m.fill))) throw new Error('笔触数据不完整。');
+      if (typeof m.id !== 'string' || !m.id || !(TOOLS as readonly string[]).concat('clear').includes(String(m.tool)) || !hex(m.color) || typeof m.width !== 'number' || !Number.isFinite(m.width) || m.width < 0 || m.width > 160 || typeof m.opacity !== 'number' || m.opacity < 0 || m.opacity > 1 || !Number.isFinite(m.opacity) || !Array.isArray(m.points) || m.points.length > 6000 || (m.fill !== undefined && !hex(m.fill))) throw new Error('笔触数据不完整。');
       for (const point of m.points) { const p = record(point); if (![p.x, p.y, p.p].every(n => typeof n === 'number' && Number.isFinite(n)) || Math.abs(p.x as number) > 10000 || Math.abs(p.y as number) > 10000 || (p.p as number) < 0 || (p.p as number) > 1) throw new Error('笔触坐标无效。'); }
     }
-    if (art.baseImage && (typeof art.baseImage !== 'string' || art.baseImage.length > 8_000_000 || !new RegExp('^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+.test(art.baseImage))) throw new Error('作品图片格式无效。');
+    if (art.baseImage && (typeof art.baseImage !== 'string' || art.baseImage.length > 8_000_000 || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(art.baseImage))) throw new Error('作品图片格式无效。');
     return { id: art.id, title: typeof art.title === 'string' ? art.title.slice(0, 100) : '未命名的片刻', paper: art.paper, marks: art.marks as Mark[], redo: [], origin: ['human', 'aether', 'dialogue'].includes(String(art.origin)) ? art.origin as Artwork['origin'] : 'human', ...(typeof art.parentId === 'string' ? { parentId: art.parentId } : {}), ...(typeof art.caption === 'string' ? { caption: art.caption.slice(0, 1000) } : {}), ...(typeof art.baseImage === 'string' ? { baseImage: art.baseImage } : {}), createdAt: typeof art.createdAt === 'string' ? art.createdAt : new Date().toISOString() };
   });
-  const messages = value.messages.map(item => { const m = record(item); if (!['user', 'assistant'].includes(String(m.role)) || typeof m.content !== 'string' || m.content.length > 30000) throw new Error('对话数据格式无效。'); return { id: uid(), role: m.role as Message['role'], content: m.content, ...(typeof m.artworkId === 'string' && ids.has(m.artworkId) ? { artworkId: m.artworkId } : {}) }; });
+  const messageIds = new Set<string>();
+  const messages = value.messages.map(item => { const m = record(item); if (typeof m.id !== 'string' || !m.id || messageIds.has(m.id) || !['user', 'assistant'].includes(String(m.role)) || typeof m.content !== 'string' || m.content.length > 30000) throw new Error('对话数据格式无效。'); messageIds.add(m.id); return { id: m.id, role: m.role as Message['role'], content: m.content, ...(typeof m.artworkId === 'string' && ids.has(m.artworkId) ? { artworkId: m.artworkId } : {}) }; });
   return { version: 2, id: uid(), artworks, messages };
 }
 ).test(art.baseImage))) throw new Error('作品图片格式无效。');
@@ -100,4 +101,11 @@ export function importJourney(raw: unknown): Journey {
   });
   const messages = value.messages.map(item => { const m = record(item); if (!['user', 'assistant'].includes(String(m.role)) || typeof m.content !== 'string' || m.content.length > 30000) throw new Error('对话数据格式无效。'); return { id: uid(), role: m.role as Message['role'], content: m.content, ...(typeof m.artworkId === 'string' && ids.has(m.artworkId) ? { artworkId: m.artworkId } : {}) }; });
   return { version: 2, id: uid(), artworks, messages };
+}
+
+export function nextQuestionStyle(text: string, current: 'natural' | 'fewer' | 'none') {
+  if (/不要.{0,5}(提问|问我|再问)|不.{0,3}提问|别.{0,3}问/.test(text)) return 'none';
+  if (/少.{0,3}问|减少.{0,3}提问/.test(text)) return 'fewer';
+  if (/可以.{0,4}问|继续.{0,3}问|允许.{0,3}提问/.test(text)) return 'natural';
+  return current;
 }
